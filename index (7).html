@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Captação IA — Escritório de Advocacia</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #F7F6F3; --surface: #fff; --surface-2: #F0EEE9;
+  --border: #E2DFD8; --border-strong: #C8C4BB;
+  --text-primary: #1A1916; --text-secondary: #6B6860; --text-muted: #9E9B95;
+  --accent: #1A4B8C; --accent-bg: #EBF1FA; --accent-border: #B8CFEE;
+  --success: #1A6B3C; --success-bg: #EBF5EF; --success-border: #A8D5B8;
+  --warning: #7A4F00; --warning-bg: #FEF7E8;
+  --danger: #8C1A1A; --danger-bg: #FAEBEB;
+  --radius: 10px; --radius-sm: 6px;
+  --sidebar-w: 220px;
+}
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text-primary); font-size: 14px; line-height: 1.5; }
+
+/* LAYOUT */
+.app { display: flex; min-height: 100vh; }
+.sidebar { width: var(--sidebar-w); background: var(--surface); border-right: 1px solid var(--border); position: fixed; top: 0; left: 0; bottom: 0; z-index: 20; display: flex; flex-direction: column; }
+.sidebar-logo { padding: 1.25rem 1rem 1rem; border-bottom: 1px solid var(--border); }
+.sidebar-logo-name { font-size: 14px; font-weight: 700; color: var(--accent); letter-spacing: -0.01em; }
+.sidebar-logo-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.sidebar-nav { padding: 0.75rem 0.5rem; flex: 1; }
+.nav-item { display: flex; align-items: center; gap: 8px; padding: 0.55rem 0.75rem; border-radius: var(--radius-sm); cursor: pointer; color: var(--text-secondary); font-size: 13px; margin-bottom: 2px; transition: all 0.1s; user-select: none; }
+.nav-item:hover { background: var(--surface-2); color: var(--text-primary); }
+.nav-item.active { background: var(--accent-bg); color: var(--accent); font-weight: 500; }
+.main { margin-left: var(--sidebar-w); flex: 1; min-width: 0; }
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0.875rem 1.5rem; position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 1rem; }
+.topbar-menu { display: none; background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-secondary); padding: 2px 6px; }
+.topbar-info { flex: 1; }
+.topbar-title { font-size: 15px; font-weight: 600; }
+.topbar-sub { font-size: 12px; color: var(--text-muted); }
+.content { padding: 1.5rem; max-width: 900px; }
+
+/* MOBILE NAV OVERLAY */
+.sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 19; }
+.sidebar-overlay.show { display: block; }
+
+/* FORM */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1rem; }
+.card-title { font-size: 13px; font-weight: 600; margin-bottom: 1rem; color: var(--text-primary); display: flex; align-items: center; gap: 6px; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-group.full { grid-column: 1/-1; }
+.form-label { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+.form-label .opt { color: var(--text-muted); font-weight: 400; }
+.form-input, .form-select, .form-textarea { padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-family: inherit; background: var(--surface); outline: none; width: 100%; transition: border-color 0.1s; }
+.form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent); }
+.form-textarea { resize: vertical; min-height: 80px; }
+.cnpj-row { display: flex; gap: 8px; }
+.cnpj-row .form-input { flex: 1; }
+.cnpj-btn { padding: 0.5rem 0.875rem; border-radius: var(--radius-sm); border: 1px solid var(--accent-border); background: var(--accent-bg); color: var(--accent); font-size: 12px; font-weight: 500; cursor: pointer; font-family: inherit; white-space: nowrap; transition: all 0.1s; }
+.cnpj-btn:hover { background: var(--accent); color: white; }
+.cnpj-status { font-size: 11px; margin-top: 5px; min-height: 16px; }
+.tom-row { display: flex; gap: 8px; }
+.tom-btn { flex: 1; padding: 0.45rem; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 12px; cursor: pointer; font-family: inherit; text-align: center; transition: all 0.1s; }
+.tom-btn.active { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); font-weight: 500; }
+.action-row { display: flex; align-items: center; justify-content: space-between; margin-top: 1.25rem; gap: 1rem; }
+.action-hint { font-size: 12px; color: var(--text-muted); }
+
+/* BUTTONS */
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 0.5rem 1rem; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; cursor: pointer; border: none; font-family: inherit; transition: all 0.1s; white-space: nowrap; }
+.btn-primary { background: var(--accent); color: white; }
+.btn-primary:hover { opacity: 0.88; }
+.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+.btn-ghost:hover { background: var(--surface-2); color: var(--text-primary); }
+.btn-green { background: #25D366; color: white; }
+.btn-green:hover { background: #1fb558; }
+.btn-pdf { background: #DC2626; color: white; }
+.btn-pdf:hover { background: #b91c1c; }
+
+/* LOADING */
+.loading-box { background: var(--accent-bg); border: 1px solid var(--accent-border); border-radius: var(--radius-sm); padding: 1.25rem; margin-bottom: 1rem; font-size: 13px; color: var(--accent); display: none; text-align: center; }
+.loading-box.show { display: block; }
+.spinner { display: inline-block; width: 15px; height: 15px; border: 2px solid var(--accent-border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 6px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* OUTPUT */
+.output-header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
+.output-lead-name { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.output-lead-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.output-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.output-section { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 0.75rem; }
+.output-section-header { background: var(--surface-2); padding: 0.65rem 1rem; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.output-section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.copy-btn { font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); cursor: pointer; transition: all 0.1s; }
+.copy-btn:hover { border-color: var(--border-strong); color: var(--text-primary); }
+
+/* BRIEFING */
+.briefing-grid { padding: 1rem; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.briefing-item { background: var(--surface-2); border-radius: var(--radius-sm); padding: 0.75rem; }
+.briefing-item.full { grid-column: 1/-1; }
+.briefing-item-label { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-bottom: 5px; }
+.briefing-item-text { font-size: 13px; color: var(--text-primary); line-height: 1.65; }
+.vuln-list { list-style: none; padding: 0; }
+.vuln-list li { font-size: 13px; color: var(--text-primary); line-height: 1.65; padding-left: 14px; position: relative; margin-bottom: 4px; }
+.vuln-list li::before { content: '•'; position: absolute; left: 0; color: var(--accent); font-weight: bold; }
+
+/* PROCESSOS */
+.processos-box { padding: 1rem; }
+.processo-item { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; margin-bottom: 0.5rem; font-size: 12px; }
+.processo-item:last-child { margin-bottom: 0; }
+.processo-numero { font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
+.processo-detalhe { color: var(--text-secondary); line-height: 1.5; }
+
+/* SCRIPT */
+.script-body { padding: 1rem; }
+.script-section { margin-bottom: 1rem; }
+.script-section:last-child { margin-bottom: 0; }
+.script-section-title { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; padding: 3px 8px; background: var(--accent-bg); border-radius: 4px; display: inline-block; }
+.script-section-text { font-size: 13px; line-height: 1.75; color: var(--text-primary); padding-left: 0.5rem; }
+
+/* EMAILS */
+.email-tabs { display: flex; gap: 4px; padding: 0.75rem 1rem 0; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.email-tabs::-webkit-scrollbar { display: none; }
+.email-tab { font-size: 11px; padding: 0.3rem 0.65rem; border-radius: var(--radius-sm) var(--radius-sm) 0 0; cursor: pointer; color: var(--text-secondary); background: transparent; border: 1px solid transparent; font-family: inherit; white-space: nowrap; transition: all 0.1s; }
+.email-tab.active { background: var(--surface); border-color: var(--border); border-bottom-color: var(--surface); color: var(--text-primary); font-weight: 500; margin-bottom: -1px; }
+.email-card { padding: 1rem; }
+.email-subject-label { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }
+.email-subject-text { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 0.875rem; padding-bottom: 0.875rem; border-bottom: 1px solid var(--border); }
+.email-body { font-size: 13px; line-height: 1.8; color: var(--text-primary); white-space: pre-wrap; }
+
+/* DASHBOARD */
+.view { display: none; } .view.active { display: block; }
+.metrics-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 0.75rem; margin-bottom: 1rem; }
+.metric-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.25rem; }
+.metric-val { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+.metric-lbl { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+.leads-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.leads-table th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); }
+.leads-table td { padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.leads-table tr:last-child td { border-bottom: none; }
+.leads-table tr:hover td { background: var(--surface-2); cursor: pointer; }
+.tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 500; }
+.tag-blue { background: var(--accent-bg); color: var(--accent); }
+.tag-green { background: var(--success-bg); color: var(--success); }
+.tag-amber { background: var(--warning-bg); color: var(--warning); }
+.empty { text-align: center; padding: 3rem; color: var(--text-muted); font-size: 13px; }
+
+/* TOAST */
+.toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: var(--text-primary); color: white; padding: 0.6rem 1rem; border-radius: var(--radius-sm); font-size: 13px; z-index: 200; opacity: 0; transform: translateY(6px); transition: all 0.2s; pointer-events: none; }
+.toast.show { opacity: 1; transform: translateY(0); }
+
+/* MODAL */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 50; display: none; align-items: center; justify-content: center; padding: 1rem; }
+.modal-overlay.show { display: flex; }
+.modal { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); width: 100%; max-width: 640px; max-height: 88vh; overflow-y: auto; }
+.modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; position: sticky; top: 0; background: var(--surface); z-index: 2; }
+.modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted); padding: 0 4px; line-height: 1; }
+.modal-body { padding: 1.25rem; }
+.modal-section { margin-bottom: 1.25rem; }
+.modal-section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+.modal-text { font-size: 13px; line-height: 1.75; white-space: pre-wrap; background: var(--surface-2); border-radius: var(--radius-sm); padding: 0.75rem; }
+
+/* MOBILE */
+@media (max-width: 680px) {
+  .sidebar { transform: translateX(-100%); transition: transform 0.25s; }
+  .sidebar.open { transform: translateX(0); }
+  .main { margin-left: 0; }
+  .topbar-menu { display: block; }
+  .form-grid { grid-template-columns: 1fr; }
+  .form-group.full { grid-column: 1; }
+  .briefing-grid { grid-template-columns: 1fr; }
+  .briefing-item.full { grid-column: 1; }
+  .metrics-row { grid-template-columns: 1fr; }
+  .tom-row { flex-direction: column; }
+  .output-actions { width: 100%; }
+  .output-actions .btn { flex: 1; justify-content: center; }
+  .action-row { flex-direction: column; align-items: stretch; }
+  .action-row .btn { justify-content: center; }
+  .content { padding: 1rem; }
+  .leads-table { font-size: 12px; }
+  .leads-table th:nth-child(3), .leads-table td:nth-child(3),
+  .leads-table th:nth-child(4), .leads-table td:nth-child(4) { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-name">Captação IA</div>
+      <div class="sidebar-logo-sub">Inteligência Comercial Jurídica</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-item active" onclick="switchView('novo');closeSidebar()" id="nav-novo">✦ Novo lead</div>
+      <div class="nav-item" onclick="switchView('dashboard');closeSidebar()" id="nav-dashboard">▦ Painel do sócio</div>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <!-- NOVO LEAD -->
+    <div class="view active" id="view-novo">
+      <div class="topbar">
+        <button class="topbar-menu" onclick="openSidebar()">☰</button>
+        <div class="topbar-info">
+          <div class="topbar-title">Novo lead</div>
+          <div class="topbar-sub">Preencha os dados para gerar o material de abordagem</div>
+        </div>
+      </div>
+      <div class="content">
+        <div class="card" id="form-card">
+          <div class="card-title">🏢 Dados da empresa</div>
+
+          <!-- CNPJ -->
+          <div class="form-group" style="margin-bottom:1rem">
+            <label class="form-label">CNPJ <span class="opt">(opcional — busca dados automáticos)</span></label>
+            <div class="cnpj-row">
+              <input class="form-input" id="inp-cnpj" placeholder="00.000.000/0001-00" maxlength="18" oninput="mascaraCNPJ(this)">
+              <button class="cnpj-btn" onclick="buscarCNPJ()">🔍 Buscar</button>
+            </div>
+            <div class="cnpj-status" id="cnpj-status"></div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Nome da empresa</label>
+              <input class="form-input" id="inp-empresa" placeholder="Ex: Grupo Madero">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Setor</label>
+              <select class="form-select" id="inp-setor">
+                <option value="">Selecione...</option>
+                <optgroup label="Alimentação"><option>Restaurantes e alimentação</option><option>Franquias de alimentação</option><option>Hotelaria e turismo</option></optgroup>
+                <optgroup label="Construção"><option>Construção civil</option><option>Incorporação imobiliária</option><option>Infraestrutura</option></optgroup>
+                <optgroup label="Saúde"><option>Hospitais e clínicas</option><option>Planos de saúde</option><option>Farmacêutico</option></optgroup>
+                <optgroup label="Tecnologia"><option>Software e SaaS</option><option>E-commerce</option><option>Fintechs</option></optgroup>
+                <optgroup label="Indústria"><option>Indústria manufatureira</option><option>Logística e transporte</option><option>Agronegócio</option><option>Energia</option></optgroup>
+                <optgroup label="Serviços"><option>Varejo</option><option>Serviços profissionais</option><option>Educação</option><option>Mídia</option></optgroup>
+                <optgroup label="Financeiro"><option>Bancos e financeiras</option><option>Seguradoras</option><option>Gestoras e fundos</option></optgroup>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Porte</label>
+              <select class="form-select" id="inp-porte">
+                <option value="">Selecione...</option>
+                <option>Pequena (até 50 funcionários)</option>
+                <option>Média (50–500 funcionários)</option>
+                <option>Grande (500–5.000 funcionários)</option>
+                <option>Corporação (5.000+)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Nome do contato</label>
+              <input class="form-input" id="inp-contato" placeholder="Ex: Dr. Carlos Mendes">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cargo</label>
+              <input class="form-input" id="inp-cargo" placeholder="Ex: Diretor Jurídico">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Canal preferencial</label>
+              <select class="form-select" id="inp-canal">
+                <option value="">Selecione...</option>
+                <option>E-mail</option><option>Ligação telefônica</option><option>WhatsApp</option><option>LinkedIn</option>
+              </select>
+            </div>
+            <div class="form-group full">
+              <label class="form-label">Área do direito</label>
+              <select class="form-select" id="inp-area">
+                <option value="">Selecione...</option>
+                <optgroup label="Empresarial">
+                  <option>Trabalhista — defesa em reclamações e compliance</option>
+                  <option>Tributário — planejamento fiscal e contencioso</option>
+                  <option>Societário — abertura, reorganização e M&A</option>
+                  <option>Contratos — elaboração, revisão e disputas</option>
+                  <option>Compliance — LGPD, anticorrupção e regulatório</option>
+                  <option>Recuperação judicial — reestruturação de dívidas</option>
+                  <option>Fusões e Aquisições — due diligence e estruturação</option>
+                </optgroup>
+                <optgroup label="Regulatório">
+                  <option>Ambiental — licenciamento e contencioso</option>
+                  <option>Regulatório — ANVISA, ANEEL, ANATEL, BACEN</option>
+                  <option>Propriedade intelectual — marcas e patentes</option>
+                  <option>Licitações e contratos públicos</option>
+                </optgroup>
+                <optgroup label="Cível">
+                  <option>Cível — cobranças e indenizações</option>
+                  <option>Consumidor — defesa em ações coletivas</option>
+                  <option>Imobiliário — contratos e due diligence</option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="form-group full">
+              <label class="form-label">Tom de abordagem</label>
+              <div class="tom-row">
+                <button class="tom-btn active" onclick="setTom('conservador',this)">🤝 Conservador</button>
+                <button class="tom-btn" onclick="setTom('moderado',this)">⚡ Moderado</button>
+                <button class="tom-btn" onclick="setTom('direto',this)">🎯 Direto e agressivo</button>
+              </div>
+            </div>
+            <div class="form-group full">
+              <label class="form-label">Contexto adicional <span class="opt">(opcional)</span></label>
+              <textarea class="form-textarea" id="inp-contexto" placeholder="O que você já sabe sobre a empresa..."></textarea>
+            </div>
+          </div>
+          <div class="action-row">
+            <span class="action-hint">Gera briefing, script e 4 e-mails em ~15 segundos</span>
+            <button class="btn btn-primary" onclick="gerarMaterial()" id="btn-gerar">✦ Gerar material</button>
+          </div>
+        </div>
+
+        <div id="loading-box" class="loading-box">
+          <div><span class="spinner"></span><span id="loading-msg">Analisando empresa e gerando material...</span></div>
+          <div style="font-size:11px;margin-top:6px;opacity:0.7">Isso leva cerca de 15 segundos</div>
+        </div>
+
+        <div id="output-area" style="display:none">
+          <div class="output-header-row">
+            <div>
+              <div class="output-lead-name" id="out-nome"></div>
+              <div class="output-lead-meta" id="out-meta"></div>
+            </div>
+            <div class="output-actions">
+              <button class="btn btn-ghost" onclick="resetForm()">← Novo lead</button>
+              <button class="btn btn-green" onclick="enviarWhatsApp()">📱 WhatsApp</button>
+              <button class="btn btn-pdf" onclick="exportarPDF()">📄 PDF</button>
+              <button class="btn btn-primary" onclick="salvarLead()">💾 Salvar</button>
+            </div>
+          </div>
+
+          <!-- BRIEFING -->
+          <div class="output-section">
+            <div class="output-section-header">
+              <span class="output-section-label">📋 Briefing pré-contato</span>
+              <button class="copy-btn" onclick="copiarBriefing()">Copiar</button>
+            </div>
+            <div class="briefing-grid" id="out-briefing-formatted"></div>
+          </div>
+
+          <!-- PROCESSOS -->
+          <div class="output-section" id="processos-section" style="display:none">
+            <div class="output-section-header">
+              <span class="output-section-label">⚖️ Processos judiciais (DataJud)</span>
+              <span id="processos-count" style="font-size:11px;color:var(--text-muted)"></span>
+            </div>
+            <div class="processos-box" id="out-processos"></div>
+          </div>
+
+          <!-- SCRIPT -->
+          <div class="output-section">
+            <div class="output-section-header">
+              <span class="output-section-label">🎯 Script de abordagem</span>
+              <button class="copy-btn" onclick="copiarScript()">Copiar</button>
+            </div>
+            <div class="script-body" id="out-script-formatted"></div>
+            <div style="display:none" id="out-script-raw"></div>
+          </div>
+
+          <!-- EMAILS -->
+          <div class="output-section">
+            <div class="output-section-header">
+              <span class="output-section-label">✉️ Cadência de e-mails</span>
+              <button class="copy-btn" onclick="copiarEmail()">Copiar ativo</button>
+            </div>
+            <div class="email-tabs" id="email-tabs">
+              <button class="email-tab active" onclick="switchEmail(0,this)">E-mail 1</button>
+              <button class="email-tab" onclick="switchEmail(1,this)">E-mail 2</button>
+              <button class="email-tab" onclick="switchEmail(2,this)">E-mail 3</button>
+              <button class="email-tab" onclick="switchEmail(3,this)">E-mail 4</button>
+            </div>
+            <div class="email-card" id="out-email-formatted"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div class="view" id="view-dashboard">
+      <div class="topbar">
+        <button class="topbar-menu" onclick="openSidebar()">☰</button>
+        <div class="topbar-info">
+          <div class="topbar-title">Painel do sócio</div>
+          <div class="topbar-sub">Visão geral da captação</div>
+        </div>
+      </div>
+      <div class="content">
+        <div class="metrics-row">
+          <div class="metric-card"><div class="metric-val" id="m-total">0</div><div class="metric-lbl">Leads gerados</div></div>
+          <div class="metric-card"><div class="metric-val" id="m-cont">0</div><div class="metric-lbl">Contatados</div></div>
+          <div class="metric-card"><div class="metric-val" id="m-reun">0</div><div class="metric-lbl">Reuniões marcadas</div></div>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <div style="padding:1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+            <span style="font-size:13px;font-weight:600">Leads</span>
+            <span id="leads-count" class="tag tag-blue">0</span>
+            <span style="font-size:11px;color:var(--text-muted);margin-left:auto">Clique para ver material completo</span>
+          </div>
+          <div id="leads-wrap"><div class="empty">Nenhum lead salvo ainda.<br>Gere e salve o primeiro.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modal">
+    <div class="modal-header">
+      <div><div style="font-size:15px;font-weight:600" id="modal-emp">—</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px" id="modal-meta">—</div></div>
+      <button class="modal-close" onclick="document.getElementById('modal').classList.remove('show')">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API_KEY = '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';
+let tomAtivo = 'conservador';
+let emailsGerados = [], emailAtivo = 0, leadAtual = null;
+let leads = [];
+try { leads = JSON.parse(localStorage.getItem('captacao_leads') || '[]'); } catch(e) {}
+
+// SIDEBAR MOBILE
+function openSidebar() {
+  document.getElementById('sidebar').classList.add('open');
+  document.getElementById('sidebar-overlay').classList.add('show');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('show');
+}
+
+function setTom(t, el) {
+  tomAtivo = t;
+  document.querySelectorAll('.tom-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function switchView(v) {
+  document.querySelectorAll('.view').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('active'));
+  document.getElementById('view-' + v).classList.add('active');
+  document.getElementById('nav-' + v).classList.add('active');
+  if (v === 'dashboard') renderDashboard();
+}
+
+// CNPJ
+function mascaraCNPJ(input) {
+  let v = input.value.replace(/\D/g,'').slice(0,14);
+  v = v.replace(/^(\d{2})(\d)/,'$1.$2');
+  v = v.replace(/^(\d{2})\.(\d{3})(\d)/,'$1.$2.$3');
+  v = v.replace(/\.(\d{3})(\d)/,'.$1/$2');
+  v = v.replace(/(\d{4})(\d)/,'$1-$2');
+  input.value = v;
+}
+
+async function buscarCNPJ() {
+  const cnpj = document.getElementById('inp-cnpj').value.replace(/\D/g,'');
+  const status = document.getElementById('cnpj-status');
+  if (cnpj.length !== 14) { status.textContent = '❌ CNPJ inválido.'; status.style.color = 'var(--danger)'; return; }
+  status.textContent = '🔄 Buscando dados...'; status.style.color = 'var(--text-muted)';
+  try {
+    let d = null;
+    for (const url of [`https://publica.cnpj.ws/cnpj/${cnpj}`, `https://brasilapi.com.br/api/cnpj/v1/${cnpj}`]) {
+      try { const r = await fetch(url); if (r.ok) { d = await r.json(); break; } } catch(e) {}
+    }
+    if (!d) throw new Error('CNPJ não encontrado');
+    const nome = d.razao_social || d.nome || '';
+    const fantasia = d.estabelecimento?.nome_fantasia || d.nome_fantasia || '';
+    const porteDesc = d.porte?.descricao || d.porte || '';
+    const capital = d.capital_social || 0;
+    const dataAbertura = d.estabelecimento?.data_inicio_atividade || d.data_inicio_atividade || '';
+    const cidade = d.estabelecimento?.cidade?.nome || d.municipio || '';
+    const estado = d.estabelecimento?.estado?.sigla || d.uf || '';
+    const situacao = d.estabelecimento?.situacao_cadastral || d.situacao_cadastral || '';
+    const email = d.estabelecimento?.email || d.email || '';
+    const telefone = d.estabelecimento?.ddd1 ? `(${d.estabelecimento.ddd1}) ${d.estabelecimento.telefone1}` : '';
+    const atvPrincipal = d.estabelecimento?.atividade_principal?.descricao || d.cnae_fiscal_descricao || '';
+    const cnaePrincipal = d.estabelecimento?.atividade_principal?.subclasse || d.cnae_fiscal || '';
+    const atvsSecundarias = (d.estabelecimento?.atividades_secundarias || d.cnaes_secundarios || []).slice(0,5).map(a=>a.descricao||a.descricao_cnae||'').filter(Boolean);
+    const socios = (d.socios || d.qsa || []).slice(0,5).map(s=>`${s.nome||s.nome_socio||''} (${s.qualificacao_socio?.descricao||s.qualificacao_socio||s.qual||''})`).filter(s=>s.trim()!=='()');
+
+    if (nome) document.getElementById('inp-empresa').value = fantasia || nome;
+    const setor = cnaeParaSetor(cnaePrincipal, atvPrincipal);
+    if (setor) { const sel = document.getElementById('inp-setor'); for (let o of sel.options) { if (o.text===setor||o.value===setor) { sel.value=o.value; break; } } }
+    if (porteDesc.includes('GRANDE')) document.getElementById('inp-porte').value='Grande (500–5.000 funcionários)';
+    else if (porteDesc.includes('MEDIO')||porteDesc.includes('MÉDIO')) document.getElementById('inp-porte').value='Média (50–500 funcionários)';
+    else if (porteDesc.includes('PEQUENO')||porteDesc.includes('MICRO')) document.getElementById('inp-porte').value='Pequena (até 50 funcionários)';
+
+    const partes = [];
+    partes.push(`Razão social: ${nome}${fantasia&&fantasia!==nome?' (Fantasia: '+fantasia+')':''}`);
+    if (dataAbertura) partes.push(`Data de abertura: ${dataAbertura}`);
+    if (capital) partes.push(`Capital social: R$ ${Number(capital).toLocaleString('pt-BR')}`);
+    if (atvPrincipal) partes.push(`Atividade principal (CNAE ${cnaePrincipal}): ${atvPrincipal}`);
+    if (atvsSecundarias.length) partes.push(`Atividades secundárias: ${atvsSecundarias.join('; ')}`);
+    if (cidade||estado) partes.push(`Sede: ${cidade}${estado?'/'+estado:''}`);
+    if (situacao) partes.push(`Situação cadastral: ${situacao}`);
+    if (email) partes.push(`E-mail: ${email}`);
+    if (telefone) partes.push(`Telefone: ${telefone}`);
+    if (socios.length) partes.push(`Quadro societário: ${socios.join(', ')}`);
+
+    const ctxAtual = document.getElementById('inp-contexto').value.trim();
+    document.getElementById('inp-contexto').value = ctxAtual ? ctxAtual+'\n\n'+partes.join('. ') : partes.join('. ');
+    status.innerHTML = `✅ <strong>${fantasia||nome}</strong> — ${atvPrincipal||'sem atividade'} — ${cidade}/${estado}${socios.length?' — '+socios.length+' sócio(s)':''}`;
+    status.style.color = 'var(--success)';
+
+    // Busca processos DataJud em paralelo
+    buscarProcessos(cnpj);
+  } catch(e) {
+    status.textContent = '❌ '+e.message+'. Preencha manualmente.';
+    status.style.color = 'var(--danger)';
+  }
+}
+
+function cnaeParaSetor(cnae, descricao) {
+  const d=(descricao||'').toLowerCase(), c=String(cnae||'');
+  if(d.includes('restaurante')||d.includes('alimentação')||d.includes('lanchonete')||c.startsWith('56')) return 'Restaurantes e alimentação';
+  if(d.includes('hotel')||d.includes('pousada')||c.startsWith('55')) return 'Hotelaria e turismo';
+  if(d.includes('constru')||d.includes('obras')||c.startsWith('41')||c.startsWith('42')||c.startsWith('43')) return 'Construção civil';
+  if(d.includes('incorpora')||d.includes('imobili')||c.startsWith('681')) return 'Incorporação imobiliária';
+  if(d.includes('hospital')||d.includes('clínica')||c.startsWith('86')) return 'Hospitais e clínicas';
+  if(d.includes('farmac')||c.startsWith('21')) return 'Farmacêutico';
+  if(d.includes('software')||d.includes('tecnologia')||c.startsWith('62')||c.startsWith('63')) return 'Software e SaaS';
+  if(d.includes('banco')||d.includes('financ')||c.startsWith('64')||c.startsWith('65')) return 'Bancos e financeiras';
+  if(d.includes('seguro')) return 'Seguradoras';
+  if(d.includes('transport')||d.includes('logística')||c.startsWith('49')) return 'Logística e transporte';
+  if(d.includes('varejo')||c.startsWith('47')) return 'Varejo';
+  if(d.includes('educação')||d.includes('ensino')||c.startsWith('85')) return 'Educação';
+  return '';
+}
+
+// DATAJUD
+let processosEncontrados = [];
+async function buscarProcessos(cnpj) {
+  processosEncontrados = [];
+  try {
+    const body = { query: { term: { 'dadosBasicos.numeroProcessoUnico': cnpj } }, size: 10 };
+    // Tenta API DataJud pública
+    const res = await fetch('https://api-publica.datajud.cnj.jus.br/api_publica_tjrj/_search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'ApiKey cDZHYzlZa0JadVREZDJCendFbXNpVVo6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==' },
+      body: JSON.stringify(body)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      processosEncontrados = data.hits?.hits?.map(h => h._source) || [];
+    }
+  } catch(e) {}
+  // Salva para uso posterior no output
+  window._processos = processosEncontrados;
+}
+
+function renderProcessos(processos) {
+  const section = document.getElementById('processos-section');
+  const box = document.getElementById('out-processos');
+  const count = document.getElementById('processos-count');
+  if (!processos || processos.length === 0) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  count.textContent = processos.length + ' processo(s) encontrado(s)';
+  box.innerHTML = processos.slice(0,5).map(p => {
+    const num = p.dadosBasicos?.numeroProcessoUnico || p.numero || '—';
+    const classe = p.dadosBasicos?.classeProcessual?.nome || '—';
+    const assunto = (p.dadosBasicos?.assunto||[]).map(a=>a.nome||'').join(', ') || '—';
+    const orgao = p.dadosBasicos?.orgaoJulgador?.nome || '—';
+    const data = p.dadosBasicos?.dataAjuizamento ? new Date(p.dadosBasicos.dataAjuizamento).toLocaleDateString('pt-BR') : '—';
+    return `<div class="processo-item">
+      <div class="processo-numero">${num}</div>
+      <div class="processo-detalhe"><strong>Classe:</strong> ${classe} | <strong>Assunto:</strong> ${assunto}<br><strong>Órgão:</strong> ${orgao} | <strong>Data:</strong> ${data}</div>
+    </div>`;
+  }).join('');
+}
+
+// RENDER
+function renderBriefing(data) {
+  const el = document.getElementById('out-briefing-formatted');
+  if (!data?.briefing) { el.innerHTML = '<div class="briefing-item full"><div class="briefing-item-text">—</div></div>'; return; }
+  const b = data.briefing;
+  let html = '';
+  if (b.perfil) html += `<div class="briefing-item full"><div class="briefing-item-label">Perfil da empresa</div><div class="briefing-item-text">${b.perfil}</div></div>`;
+  if (b.funcionarios) html += `<div class="briefing-item"><div class="briefing-item-label">👥 Funcionários estimados</div><div class="briefing-item-text">${b.funcionarios}</div></div>`;
+  if (b.faturamento) html += `<div class="briefing-item"><div class="briefing-item-label">💰 Faturamento estimado</div><div class="briefing-item-text">${b.faturamento}</div></div>`;
+  if (b.presenca) html += `<div class="briefing-item full"><div class="briefing-item-label">📍 Presença geográfica</div><div class="briefing-item-text">${b.presenca}</div></div>`;
+  if (b.vulnerabilidades?.length) {
+    html += `<div class="briefing-item full"><div class="briefing-item-label">⚠️ Vulnerabilidades jurídicas</div><ul class="vuln-list">${b.vulnerabilidades.map(v=>`<li>${v}</li>`).join('')}</ul></div>`;
+  }
+  if (b.mencionar) html += `<div class="briefing-item"><div class="briefing-item-label">✅ O que mencionar</div><div class="briefing-item-text">${b.mencionar}</div></div>`;
+  if (b.evitar) html += `<div class="briefing-item"><div class="briefing-item-label">🚫 O que evitar</div><div class="briefing-item-text">${b.evitar}</div></div>`;
+  if (!html) html = `<div class="briefing-item full"><div class="briefing-item-text">${typeof b==='string'?b:JSON.stringify(b)}</div></div>`;
+  el.innerHTML = html;
+}
+
+function renderScript(data) {
+  const el = document.getElementById('out-script-formatted');
+  const raw = document.getElementById('out-script-raw');
+  if (!data?.script) { el.innerHTML = '<div class="script-section"><div class="script-section-text">—</div></div>'; return; }
+  const s = data.script; let html='', rawText='';
+  if (typeof s==='object') {
+    const secs=[['abertura','Abertura'],['gancho','Gancho'],['qualificacao','Qualificação'],['fechamento','Fechamento']];
+    secs.forEach(([k,l])=>{ if(s[k]){html+=`<div class="script-section"><div class="script-section-title">${l}</div><div class="script-section-text">${s[k]}</div></div>`;rawText+=`${l.toUpperCase()}:\n${s[k]}\n\n`;}});
+  } else {
+    s.split(/\n\n+/).forEach(p=>{const lines=p.split('\n');const t=lines[0].replace(/[:\*\_]/g,'').trim();const b=lines.slice(1).join('\n').trim();html+=b?`<div class="script-section"><div class="script-section-title">${t}</div><div class="script-section-text">${b}</div></div>`:`<div class="script-section"><div class="script-section-text">${p}</div></div>`;});
+    rawText=s;
+  }
+  el.innerHTML=html; raw.textContent=rawText;
+}
+
+function renderEmail(idx) {
+  const el=document.getElementById('out-email-formatted');
+  const e=emailsGerados[idx];
+  if(!e){el.innerHTML='—';return;}
+  el.innerHTML=`<div class="email-subject-label">Assunto</div><div class="email-subject-text">${e.titulo||e.assunto||'—'}</div><div class="email-body">${e.corpo||e.body||'—'}</div>`;
+}
+
+function updateTabs() {
+  document.querySelectorAll('.email-tab').forEach((t,i)=>{t.textContent=emailsGerados[i]?`E-mail ${i+1} — ${emailsGerados[i].angulo||''}`:(`E-mail ${i+1}`);});
+}
+
+function switchEmail(idx,el) {
+  emailAtivo=idx;
+  document.querySelectorAll('.email-tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  renderEmail(idx);
+}
+
+// GERAR
+async function gerarMaterial() {
+  const empresa=document.getElementById('inp-empresa').value.trim();
+  const setor=document.getElementById('inp-setor').value;
+  const porte=document.getElementById('inp-porte').value;
+  const contato=document.getElementById('inp-contato').value.trim();
+  const cargo=document.getElementById('inp-cargo').value.trim();
+  const canal=document.getElementById('inp-canal').value;
+  const area=document.getElementById('inp-area').value;
+  const contexto=document.getElementById('inp-contexto').value.trim();
+  if(!empresa||!setor||!porte){showToast('Preencha empresa, setor e porte');return;}
+  if(!area){showToast('Selecione a área do direito');return;}
+
+  const btn=document.getElementById('btn-gerar');
+  btn.disabled=true; btn.textContent='Gerando...';
+  document.getElementById('form-card').style.display='none';
+  document.getElementById('output-area').style.display='none';
+  document.getElementById('processos-section').style.display='none';
+  document.getElementById('loading-box').classList.add('show');
+
+  const tomDesc={conservador:'formal e respeitoso, sem pressão',moderado:'profissional e direto, mencionando riscos sem pressionar',direto:'direto, criando urgência real, apontando custo financeiro da inação'};
+
+  const prompt=`Você é especialista sênior em captação comercial para escritórios de advocacia brasileiros.
+
+EMPRESA: ${empresa} | SETOR: ${setor} | PORTE: ${porte}
+CONTATO: ${contato||'não informado'} | CARGO: ${cargo||'não informado'} | CANAL: ${canal||'não informado'}
+ÁREA DO DIREITO: ${area} | TOM: ${tomDesc[tomAtivo]}
+CONTEXTO E DADOS DA RECEITA FEDERAL: ${contexto||'nenhum'}
+
+Gere material de abordagem específico. Use o contexto da Receita Federal quando disponível.
+
+Responda SOMENTE JSON puro, sem markdown:
+{"briefing":{"perfil":"...","funcionarios":"...","faturamento":"...","presenca":"...","vulnerabilidades":["...","...","...","..."],"mencionar":"...","evitar":"..."},"script":{"abertura":"...","gancho":"...","qualificacao":"...","fechamento":"..."},"emails":[{"titulo":"...","angulo":"Risco do setor","corpo":"..."},{"titulo":"...","angulo":"Custo da inação","corpo":"..."},{"titulo":"...","angulo":"Caso análogo","corpo":"..."},{"titulo":"...","angulo":"Proposta com prazo","corpo":"..."}]}`;
+
+  try {
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':API_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:2500,messages:[{role:'user',content:prompt}]})});
+    const data=await res.json();
+    if(data.error) throw new Error(data.error.message);
+    const raw=data.content?.find(b=>b.type==='text')?.text||'';
+    let parsed;
+    try{const m=raw.match(/\{[\s\S]*\}/);parsed=JSON.parse(m?m[0]:raw);}
+    catch{parsed={briefing:{perfil:raw||'Erro ao gerar.'},script:{abertura:'—',gancho:'—',qualificacao:'—',fechamento:'—'},emails:[{titulo:'—',angulo:'—',corpo:'—'}]};}
+
+    document.getElementById('loading-box').classList.remove('show');
+    document.getElementById('out-nome').textContent=empresa;
+    document.getElementById('out-meta').textContent=[setor,porte,area.split('—')[0].trim()].join(' · ');
+    renderBriefing(parsed);
+    renderScript(parsed);
+
+    // Renderiza processos se encontrados
+    if(window._processos?.length) renderProcessos(window._processos);
+
+    emailsGerados=parsed.emails||[];emailAtivo=0;renderEmail(0);updateTabs();
+    document.getElementById('output-area').style.display='block';
+    leadAtual={empresa,setor,porte,contato,cargo,canal,area,tom:tomAtivo,data_lead:parsed,processos:window._processos||[],status:'Gerado',data:new Date().toLocaleDateString('pt-BR')};
+    window._processos=[];
+  } catch(err) {
+    document.getElementById('loading-box').classList.remove('show');
+    document.getElementById('form-card').style.display='block';
+    showToast('Erro: '+err.message);
+    console.error(err);
+  }
+  btn.disabled=false; btn.textContent='✦ Gerar material';
+}
+
+// COPIAR
+function copiarBriefing() {
+  const b=leadAtual?.data_lead?.briefing;
+  if(!b){showToast('Gere o material primeiro');return;}
+  let t='';
+  if(b.perfil) t+='PERFIL:\n'+b.perfil+'\n\n';
+  if(b.funcionarios) t+='FUNCIONÁRIOS: '+b.funcionarios+'\n';
+  if(b.faturamento) t+='FATURAMENTO: '+b.faturamento+'\n';
+  if(b.presenca) t+='PRESENÇA: '+b.presenca+'\n\n';
+  if(b.vulnerabilidades) t+='VULNERABILIDADES:\n'+b.vulnerabilidades.map(v=>'• '+v).join('\n')+'\n\n';
+  if(b.mencionar) t+='MENCIONAR: '+b.mencionar+'\n';
+  if(b.evitar) t+='EVITAR: '+b.evitar;
+  navigator.clipboard.writeText(t).then(()=>showToast('Briefing copiado!'));
+}
+
+function copiarScript() {
+  const t=document.getElementById('out-script-raw').textContent;
+  navigator.clipboard.writeText(t).then(()=>showToast('Script copiado!'));
+}
+
+function copiarEmail() {
+  const e=emailsGerados[emailAtivo];
+  if(!e){showToast('Gere o material primeiro');return;}
+  navigator.clipboard.writeText('Assunto: '+(e.titulo||'')+'\n\n'+(e.corpo||'')).then(()=>showToast('E-mail copiado!'));
+}
+
+// WHATSAPP
+function enviarWhatsApp() {
+  const e=emailsGerados[0];
+  if(!e){showToast('Gere o material primeiro');return;}
+  window.open('https://wa.me/?text='+encodeURIComponent('*'+e.titulo+'*\n\n'+e.corpo),'_blank');
+}
+
+// PDF
+function exportarPDF() {
+  if(!leadAtual){showToast('Gere o material primeiro');return;}
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+  const W=210, M=15, TW=W-M*2;
+  let y=M;
+
+  function addLine(text,size,bold,color,indent){
+    doc.setFontSize(size||11);
+    doc.setFont('helvetica',bold?'bold':'normal');
+    doc.setTextColor(color||'#1A1916');
+    const lines=doc.splitTextToSize((indent?'    ':'')+text,TW-(indent?8:0));
+    lines.forEach(l=>{
+      if(y>280){doc.addPage();y=M;}
+      doc.text(l,M+(indent?4:0),y);
+      y+=size?size*0.45:5;
+    });
+    y+=1;
+  }
+
+  function addSection(title){
+    if(y>260){doc.addPage();y=M;}
+    y+=3;
+    doc.setFillColor(235,241,250);
+    doc.roundedRect(M,y-4,TW,8,2,2,'F');
+    addLine(title,10,true,'#1A4B8C');
+    y+=1;
+  }
+
+  // Cabeçalho
+  doc.setFillColor(26,75,140);
+  doc.rect(0,0,210,22,'F');
+  doc.setTextColor('#ffffff');
+  doc.setFontSize(14); doc.setFont('helvetica','bold');
+  doc.text('CAPTAÇÃO IA — DOSSIÊ COMERCIAL',M,10);
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.text(`Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`,M,17);
+  y=30;
+
+  addLine(leadAtual.empresa,16,true);
+  addLine([leadAtual.setor,leadAtual.porte,leadAtual.area?.split('—')[0]?.trim()].filter(Boolean).join(' · '),9,false,'#6B6860');
+  y+=4;
+
+  const b=leadAtual.data_lead?.briefing||{};
+  addSection('BRIEFING PRÉ-CONTATO');
+  if(b.perfil){addLine('Perfil:',9,true);addLine(b.perfil,9,false,'#1A1916',true);}
+  if(b.funcionarios){addLine('Funcionários estimados:',9,true);addLine(b.funcionarios,9,false,'#1A1916',true);}
+  if(b.faturamento){addLine('Faturamento estimado:',9,true);addLine(b.faturamento,9,false,'#1A1916',true);}
+  if(b.presenca){addLine('Presença geográfica:',9,true);addLine(b.presenca,9,false,'#1A1916',true);}
+  if(b.vulnerabilidades?.length){addLine('Vulnerabilidades jurídicas:',9,true);b.vulnerabilidades.forEach(v=>addLine('• '+v,9,false,'#1A1916',true));}
+  if(b.mencionar){addLine('O que mencionar:',9,true);addLine(b.mencionar,9,false,'#1A1916',true);}
+  if(b.evitar){addLine('O que evitar:',9,true);addLine(b.evitar,9,false,'#1A1916',true);}
+
+  const s=leadAtual.data_lead?.script||{};
+  addSection('SCRIPT DE ABORDAGEM');
+  [['abertura','Abertura'],['gancho','Gancho'],['qualificacao','Qualificação'],['fechamento','Fechamento']].forEach(([k,l])=>{if(s[k]){addLine(l+':',9,true);addLine(s[k],9,false,'#1A1916',true);}});
+
+  const emails=leadAtual.data_lead?.emails||[];
+  emails.forEach((e,i)=>{
+    addSection(`E-MAIL ${i+1} — ${e.angulo}`);
+    addLine('Assunto: '+e.titulo,9,true);
+    y+=1;
+    addLine(e.corpo||'',9);
+  });
+
+  doc.save(`captacao_${leadAtual.empresa.replace(/\s+/g,'_')}_${new Date().toLocaleDateString('pt-BR').replace(/\//g,'-')}.pdf`);
+  showToast('PDF gerado!');
+}
+
+// SALVAR
+function salvarLead() {
+  if(!leadAtual){showToast('Gere o material primeiro');return;}
+  leads.unshift(leadAtual);
+  try{localStorage.setItem('captacao_leads',JSON.stringify(leads));}catch(e){}
+  showToast('Lead salvo!');
+  leadAtual=null;
+  setTimeout(()=>{resetForm();switchView('dashboard');},800);
+}
+
+function resetForm() {
+  document.getElementById('form-card').style.display='block';
+  document.getElementById('output-area').style.display='none';
+  document.getElementById('loading-box').classList.remove('show');
+  document.getElementById('processos-section').style.display='none';
+  document.getElementById('cnpj-status').textContent='';
+  ['inp-empresa','inp-contato','inp-cargo','inp-contexto','inp-cnpj'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['inp-setor','inp-porte','inp-canal','inp-area'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  window._processos=[];
+}
+
+// DASHBOARD
+function renderDashboard() {
+  document.getElementById('m-total').textContent=leads.length;
+  document.getElementById('m-cont').textContent=leads.filter(l=>l.status!=='Gerado').length;
+  document.getElementById('m-reun').textContent=leads.filter(l=>l.status==='Reunião marcada').length;
+  document.getElementById('leads-count').textContent=leads.length;
+  const wrap=document.getElementById('leads-wrap');
+  if(!leads.length){wrap.innerHTML='<div class="empty">Nenhum lead salvo ainda.</div>';return;}
+  const sc={Gerado:'tag-blue',Contatado:'tag-amber','Reunião marcada':'tag-green','Proposta enviada':'tag-amber',Fechado:'tag-green'};
+  wrap.innerHTML='<table class="leads-table"><thead><tr><th>Empresa</th><th>Área</th><th>Status</th><th>Data</th><th></th></tr></thead><tbody>'+
+    leads.map((l,i)=>'<tr onclick="abrirModal('+i+')">'+
+      '<td><strong>'+l.empresa+'</strong></td>'+
+      '<td style="color:var(--text-secondary)">'+(l.area?l.area.split('—')[0].trim():'—')+'</td>'+
+      '<td><span class="tag '+(sc[l.status]||'tag-blue')+'">'+l.status+'</span></td>'+
+      '<td style="color:var(--text-muted)">'+l.data+'</td>'+
+      '<td onclick="event.stopPropagation()"><select onchange="updateStatus('+i+',this.value)" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);font-family:inherit;cursor:pointer">'+
+      ['Contatado','Reunião marcada','Proposta enviada','Fechado'].map(s=>'<option '+(l.status===s?'selected':'')+'>'+s+'</option>').join('')+
+      '</select></td></tr>').join('')+'</tbody></table>';
+}
+
+function abrirModal(idx) {
+  const l=leads[idx];
+  document.getElementById('modal-emp').textContent=l.empresa;
+  document.getElementById('modal-meta').textContent=[l.setor,l.porte,l.data].filter(Boolean).join(' · ');
+  const b=l.data_lead?.briefing||{}, s=l.data_lead?.script||{}, emails=l.data_lead?.emails||[];
+  let html='<div class="modal-section"><div class="modal-section-label">Briefing</div>';
+  if(b.perfil) html+='<div class="modal-text" style="margin-bottom:6px"><strong>Perfil:</strong> '+b.perfil+'</div>';
+  if(b.vulnerabilidades) html+='<div class="modal-text" style="margin-bottom:6px"><strong>Vulnerabilidades:</strong><br>'+(Array.isArray(b.vulnerabilidades)?b.vulnerabilidades.map(v=>'• '+v).join('<br>'):b.vulnerabilidades)+'</div>';
+  html+='</div><div class="modal-section"><div class="modal-section-label">Script</div>';
+  [['abertura','Abertura'],['gancho','Gancho'],['qualificacao','Qualificação'],['fechamento','Fechamento']].forEach(([k,l2])=>{if(s[k])html+='<div class="modal-text" style="margin-bottom:6px"><strong>'+l2+':</strong> '+s[k]+'</div>';});
+  html+='</div><div class="modal-section"><div class="modal-section-label">E-mails</div>';
+  emails.forEach((e,i)=>{html+='<div class="modal-text" style="margin-bottom:8px"><strong>E-mail '+(i+1)+' — '+e.angulo+'</strong><br>Assunto: '+e.titulo+'<br><br>'+e.corpo+'</div>';});
+  html+='</div>';
+  document.getElementById('modal-body').innerHTML=html;
+  document.getElementById('modal').classList.add('show');
+}
+
+function updateStatus(idx,status) {
+  leads[idx].status=status;
+  try{localStorage.setItem('captacao_leads',JSON.stringify(leads));}catch(e){}
+  renderDashboard(); showToast('Status atualizado');
+}
+
+function showToast(msg) {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2200);
+}
+</script>
+</body>
+</html>
