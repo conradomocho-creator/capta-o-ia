@@ -414,7 +414,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 <div class="toast" id="toast"></div>
 
 <script>
-const API_KEY = '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';
+const BACKEND_URL = 'https://captacao-backend-production.up.railway.app';
 let tomAtivo = 'conservador';
 let emailsGerados = [], emailAtivo = 0, leadAtual = null;
 let leads = [];
@@ -461,24 +461,26 @@ async function buscarCNPJ() {
   status.textContent = '🔄 Buscando dados...'; status.style.color = 'var(--text-muted)';
   try {
     let d = null;
-    for (const url of [`https://publica.cnpj.ws/cnpj/${cnpj}`, `https://brasilapi.com.br/api/cnpj/v1/${cnpj}`]) {
-      try { const r = await fetch(url); if (r.ok) { d = await r.json(); break; } } catch(e) {}
-    }
-    if (!d) throw new Error('CNPJ não encontrado');
-    const nome = d.razao_social || d.nome || '';
-    const fantasia = d.estabelecimento?.nome_fantasia || d.nome_fantasia || '';
-    const porteDesc = d.porte?.descricao || d.porte || '';
-    const capital = d.capital_social || 0;
-    const dataAbertura = d.estabelecimento?.data_inicio_atividade || d.data_inicio_atividade || '';
-    const cidade = d.estabelecimento?.cidade?.nome || d.municipio || '';
-    const estado = d.estabelecimento?.estado?.sigla || d.uf || '';
-    const situacao = d.estabelecimento?.situacao_cadastral || d.situacao_cadastral || '';
+    try { const r = await fetch(`${BACKEND_URL}/api/cnpj/${cnpj}`); if (r.ok) { d = await r.json(); } } catch(e) {}
+    if (!d) throw new Error('CNPJ não encontrado nas bases públicas');
+
+    // Normaliza campos entre as diferentes APIs
+    const nome = d.razao_social || d.nome || d.company || '';
+    const fantasia = d.estabelecimento?.nome_fantasia || d.nome_fantasia || d.alias || '';
+    const porteDesc = d.porte?.descricao || d.porte || d.size || '';
+    const capital = d.capital_social || d.share_capital || 0;
+    const dataAbertura = d.estabelecimento?.data_inicio_atividade || d.data_inicio_atividade || d.founded || '';
+    const cidade = d.estabelecimento?.cidade?.nome || d.municipio || d.city || '';
+    const estado = d.estabelecimento?.estado?.sigla || d.uf || d.state || '';
+    const situacao = d.estabelecimento?.situacao_cadastral || d.situacao_cadastral || d.status?.text || '';
     const email = d.estabelecimento?.email || d.email || '';
-    const telefone = d.estabelecimento?.ddd1 ? `(${d.estabelecimento.ddd1}) ${d.estabelecimento.telefone1}` : '';
-    const atvPrincipal = d.estabelecimento?.atividade_principal?.descricao || d.cnae_fiscal_descricao || '';
-    const cnaePrincipal = d.estabelecimento?.atividade_principal?.subclasse || d.cnae_fiscal || '';
-    const atvsSecundarias = (d.estabelecimento?.atividades_secundarias || d.cnaes_secundarios || []).slice(0,5).map(a=>a.descricao||a.descricao_cnae||'').filter(Boolean);
-    const socios = (d.socios || d.qsa || []).slice(0,5).map(s=>`${s.nome||s.nome_socio||''} (${s.qualificacao_socio?.descricao||s.qualificacao_socio||s.qual||''})`).filter(s=>s.trim()!=='()');
+    const ddd = d.estabelecimento?.ddd1 || d.ddd_telefone_1?.slice(0,2) || '';
+    const tel = d.estabelecimento?.telefone1 || d.ddd_telefone_1?.slice(2) || d.telefone_1 || '';
+    const telefone = ddd && tel ? `(${ddd}) ${tel}` : '';
+    const atvPrincipal = d.estabelecimento?.atividade_principal?.descricao || d.cnae_fiscal_descricao || d.primary_activity?.[0]?.text || '';
+    const cnaePrincipal = d.estabelecimento?.atividade_principal?.subclasse || d.cnae_fiscal || d.primary_activity?.[0]?.code || '';
+    const atvsSecundarias = (d.estabelecimento?.atividades_secundarias || d.cnaes_secundarios || d.secondary_activities || []).slice(0,5).map(a=>a.descricao||a.descricao_cnae||a.text||'').filter(Boolean);
+    const socios = (d.socios || d.qsa || d.members || []).slice(0,5).map(s=>`${s.nome||s.nome_socio||s.name||''} (${s.qualificacao_socio?.descricao||s.qualificacao_socio||s.qual||s.role||''})`).filter(s=>s.trim()!=='()');
 
     if (nome) document.getElementById('inp-empresa').value = fantasia || nome;
     const setor = cnaeParaSetor(cnaePrincipal, atvPrincipal);
@@ -505,7 +507,7 @@ async function buscarCNPJ() {
     status.style.color = 'var(--success)';
 
     // Busca processos DataJud em paralelo
-    buscarProcessos(cnpj);
+    buscarProcessos(cnpj, fantasia || nome);
   } catch(e) {
     status.textContent = '❌ '+e.message+'. Preencha manualmente.';
     status.style.color = 'var(--danger)';
@@ -531,22 +533,17 @@ function cnaeParaSetor(cnae, descricao) {
 
 // DATAJUD
 let processosEncontrados = [];
-async function buscarProcessos(cnpj) {
+async function buscarProcessos(cnpj, nomeEmpresa) {
   processosEncontrados = [];
   try {
-    const body = { query: { term: { 'dadosBasicos.numeroProcessoUnico': cnpj } }, size: 10 };
-    // Tenta API DataJud pública
-    const res = await fetch('https://api-publica.datajud.cnj.jus.br/api_publica_tjrj/_search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'ApiKey cDZHYzlZa0JadVREZDJCendFbXNpVVo6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==' },
-      body: JSON.stringify(body)
-    });
+    const res = await fetch(`${BACKEND_URL}/api/datajud/search?cnpj=${cnpj}`, { method: 'GET' });
     if (res.ok) {
       const data = await res.json();
-      processosEncontrados = data.hits?.hits?.map(h => h._source) || [];
+      processosEncontrados = (data.hits?.hits || []).map(h => ({ ...h._source, _tribunal: h._tribunal || '' })).slice(0, 8);
     }
-  } catch(e) {}
-  // Salva para uso posterior no output
+  } catch(e) {
+    console.log('DataJud error:', e);
+  }
   window._processos = processosEncontrados;
 }
 
@@ -557,15 +554,16 @@ function renderProcessos(processos) {
   if (!processos || processos.length === 0) { section.style.display = 'none'; return; }
   section.style.display = 'block';
   count.textContent = processos.length + ' processo(s) encontrado(s)';
-  box.innerHTML = processos.slice(0,5).map(p => {
+  box.innerHTML = processos.map(p => {
     const num = p.dadosBasicos?.numeroProcessoUnico || p.numero || '—';
     const classe = p.dadosBasicos?.classeProcessual?.nome || '—';
-    const assunto = (p.dadosBasicos?.assunto||[]).map(a=>a.nome||'').join(', ') || '—';
+    const assuntos = (p.dadosBasicos?.assunto||[]).map(a=>a.nome||'').filter(Boolean).join(', ') || '—';
     const orgao = p.dadosBasicos?.orgaoJulgador?.nome || '—';
     const data = p.dadosBasicos?.dataAjuizamento ? new Date(p.dadosBasicos.dataAjuizamento).toLocaleDateString('pt-BR') : '—';
+    const tribunal = p._tribunal || '';
     return `<div class="processo-item">
-      <div class="processo-numero">${num}</div>
-      <div class="processo-detalhe"><strong>Classe:</strong> ${classe} | <strong>Assunto:</strong> ${assunto}<br><strong>Órgão:</strong> ${orgao} | <strong>Data:</strong> ${data}</div>
+      <div class="processo-numero">${num} ${tribunal ? '<span style="font-size:10px;color:var(--accent);background:var(--accent-bg);padding:1px 6px;border-radius:4px;margin-left:4px">'+tribunal+'</span>' : ''}</div>
+      <div class="processo-detalhe"><strong>Classe:</strong> ${classe}<br><strong>Assunto:</strong> ${assuntos}<br><strong>Órgão:</strong> ${orgao} | <strong>Ajuizado em:</strong> ${data}</div>
     </div>`;
   }).join('');
 }
@@ -657,10 +655,10 @@ Responda SOMENTE JSON puro, sem markdown:
 {"briefing":{"perfil":"...","funcionarios":"...","faturamento":"...","presenca":"...","vulnerabilidades":["...","...","...","..."],"mencionar":"...","evitar":"..."},"script":{"abertura":"...","gancho":"...","qualificacao":"...","fechamento":"..."},"emails":[{"titulo":"...","angulo":"Risco do setor","corpo":"..."},{"titulo":"...","angulo":"Custo da inação","corpo":"..."},{"titulo":"...","angulo":"Caso análogo","corpo":"..."},{"titulo":"...","angulo":"Proposta com prazo","corpo":"..."}]}`;
 
   try {
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':API_KEY,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:2500,messages:[{role:'user',content:prompt}]})});
+    const res=await fetch(`${BACKEND_URL}/api/analysis`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,model:'claude-sonnet-4-6'})});
     const data=await res.json();
-    if(data.error) throw new Error(data.error.message);
-    const raw=data.content?.find(b=>b.type==='text')?.text||'';
+    if(data.error) throw new Error(typeof data.error==='string'?data.error:(data.error?.message||'Erro ao gerar'));
+    const raw=data.analysis||'';
     let parsed;
     try{const m=raw.match(/\{[\s\S]*\}/);parsed=JSON.parse(m?m[0]:raw);}
     catch{parsed={briefing:{perfil:raw||'Erro ao gerar.'},script:{abertura:'—',gancho:'—',qualificacao:'—',fechamento:'—'},emails:[{titulo:'—',angulo:'—',corpo:'—'}]};}
