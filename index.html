@@ -451,15 +451,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
             </div>
             <div class="form-group">
               <label class="form-label">Valor mínimo (R$)</label>
-              <input class="form-input" type="number" min="0" id="pgfn-f-min" placeholder="0" oninput="pgfnApplyFilters()">
+              <input class="form-input" type="text" inputmode="numeric" id="pgfn-f-min" placeholder="Ex: 100.000" value="100.000" oninput="pgfnApplyFilters()">
             </div>
             <div class="form-group">
               <label class="form-label">Valor máximo (R$)</label>
-              <input class="form-input" type="number" min="0" id="pgfn-f-max" placeholder="Sem limite" oninput="pgfnApplyFilters()">
+              <input class="form-input" type="text" inputmode="numeric" id="pgfn-f-max" placeholder="Sem limite" oninput="pgfnApplyFilters()">
             </div>
             <div class="form-group full">
               <label class="form-label">Setor (CNAE)</label>
               <select class="form-select" id="pgfn-f-setor" onchange="pgfnApplyFilters()"><option value="">Todos</option></select>
+            </div>
+            <div class="form-group full">
+              <span class="action-hint">Valores em reais — pode digitar com ou sem pontos (ex: 100.000 ou 100000). Padrão: dívidas a partir de R$ 100.000.</span>
             </div>
           </div>
         </div>
@@ -963,6 +966,30 @@ function pgfnInitFiltros() {
   }
 }
 
+// Colunas exatas do arquivo oficial exportado pela PGFN (listadevedores.pgfn.gov.br).
+// Quando todas as obrigatórias são encontradas, o mapeamento é 100% automático e a
+// etapa de confirmação manual é pulada.
+const PGFN_HEADER_EXACT = {
+  nome: 'NOME_DEVEDOR',
+  cnpj: 'CPF_CNPJ',
+  uf: 'UF_DEVEDOR',
+  valor: 'VALOR_CONSOLIDADO',
+  tipo: 'TIPO_CREDITO',
+  tipoSecundario: 'RECEITA_PRINCIPAL',
+  municipio: 'NOME_MUN_DEVEDOR',
+  situacao: 'SITUACAO_INSCRICAO',
+  dataInscricao: 'DATA_INSCRICAO',
+};
+const PGFN_HEADER_EXACT_OBRIGATORIOS = ['nome', 'cnpj', 'uf', 'valor'];
+
+function pgfnDetectFormatoOficial(headers) {
+  const upper = headers.map(h => (h || '').toString().trim().toUpperCase());
+  const mapping = {};
+  for (const campo in PGFN_HEADER_EXACT) mapping[campo] = upper.indexOf(PGFN_HEADER_EXACT[campo]);
+  const completo = PGFN_HEADER_EXACT_OBRIGATORIOS.every(campo => mapping[campo] !== -1);
+  return completo ? mapping : null;
+}
+
 // --- Leitura do arquivo (.zip ou .csv) ---
 async function pgfnHandleFile(ev) {
   const file = ev.target.files?.[0];
@@ -988,9 +1015,18 @@ async function pgfnHandleFile(ev) {
     if (!parsed.headers.length || !parsed.rows.length) throw new Error('Não foi possível identificar linhas/colunas no arquivo.');
     pgfnRawHeaders = parsed.headers;
     pgfnRawRows = parsed.rows;
+
+    const formatoOficial = pgfnDetectFormatoOficial(pgfnRawHeaders);
+    if (formatoOficial) {
+      const n = pgfnImportar(formatoOficial);
+      status.innerHTML = `✅ Formato oficial da PGFN reconhecido — ${n} devedor(es) importado(s) automaticamente (de ${parsed.rows.length} linha(s) lida(s)).`;
+      status.style.color = 'var(--success)';
+      return;
+    }
+
     pgfnMapping = pgfnAutoMapColumns(pgfnRawHeaders);
     pgfnRenderMappingUI();
-    status.innerHTML = `✅ ${parsed.rows.length} linha(s) lida(s), ${parsed.headers.length} coluna(s). Confira o mapeamento abaixo e confirme.`;
+    status.innerHTML = `✅ ${parsed.rows.length} linha(s) lida(s), ${parsed.headers.length} coluna(s). Formato não reconhecido automaticamente — confira o mapeamento abaixo e confirme.`;
     status.style.color = 'var(--success)';
   } catch (e) {
     status.textContent = '❌ ' + e.message;
@@ -1066,6 +1102,40 @@ function pgfnRenderMappingUI() {
   box.style.display = 'block';
 }
 
+function pgfnRowToDevedor(row, mapping) {
+  const get = (campo) => mapping[campo] >= 0 ? (row[mapping[campo]] || '') : '';
+  const cnpjLimpo = get('cnpj').replace(/\D/g,'');
+  const tipoTexto = [get('tipo'), get('tipoSecundario')].filter(Boolean).join(' ');
+  return {
+    nome: get('nome') || get('fantasia') || 'Empresa sem nome',
+    fantasia: get('fantasia'),
+    cnpj: cnpjLimpo,
+    isCnpj: cnpjLimpo.length === 14,
+    uf: get('uf').toUpperCase().trim(),
+    valor: pgfnParseValorBR(get('valor')),
+    tipoRaw: get('tipo') || tipoTexto,
+    tipo: pgfnClassificarTipo(tipoTexto),
+    municipio: get('municipio'),
+    cnae: get('cnae'),
+    setor: cnaeParaSetor('', get('cnae')),
+    situacao: get('situacao'),
+    dataInscricao: get('dataInscricao'),
+  };
+}
+
+// Constrói pgfnDevedores a partir de pgfnRawRows + um mapping (campo -> índice de coluna).
+// Usado tanto pela detecção automática do formato oficial quanto pela confirmação manual.
+function pgfnImportar(mapping) {
+  pgfnDevedores = pgfnRawRows.map(row => pgfnRowToDevedor(row, mapping)).filter(d => d.cnpj);
+  document.getElementById('pgfn-mapping-box').style.display = 'none';
+  document.getElementById('pgfn-filtros-card').style.display = 'block';
+  document.getElementById('pgfn-resultados-card').style.display = 'block';
+  pgfnPopulateSetorFiltro();
+  pgfnApplyFilters();
+  showToast(pgfnDevedores.length + ' devedores importados');
+  return pgfnDevedores.length;
+}
+
 function pgfnConfirmImport() {
   const todosCampos = [...PGFN_CAMPOS_OBRIGATORIOS, ...PGFN_CAMPOS_OPCIONAIS];
   const mapping = {};
@@ -1073,31 +1143,8 @@ function pgfnConfirmImport() {
   const faltando = PGFN_CAMPOS_OBRIGATORIOS.filter(([campo]) => mapping[campo] === -1);
   if (faltando.length) { showToast('Selecione a coluna de: ' + faltando.map(f=>f[1]).join(', ')); return; }
 
-  pgfnDevedores = pgfnRawRows.map(row => {
-    const get = (campo) => mapping[campo] >= 0 ? (row[mapping[campo]] || '') : '';
-    const cnpjLimpo = get('cnpj').replace(/\D/g,'');
-    return {
-      nome: get('nome') || get('fantasia') || 'Empresa sem nome',
-      fantasia: get('fantasia'),
-      cnpj: cnpjLimpo,
-      isCnpj: cnpjLimpo.length === 14,
-      uf: get('uf').toUpperCase().trim(),
-      valor: pgfnParseValorBR(get('valor')),
-      tipoRaw: get('tipo'),
-      tipo: pgfnClassificarTipo(get('tipo')),
-      municipio: get('municipio'),
-      cnae: get('cnae'),
-      setor: cnaeParaSetor('', get('cnae')),
-    };
-  }).filter(d => d.cnpj);
-
-  document.getElementById('pgfn-mapping-box').style.display = 'none';
-  document.getElementById('pgfn-filtros-card').style.display = 'block';
-  document.getElementById('pgfn-resultados-card').style.display = 'block';
-  document.getElementById('pgfn-import-status').innerHTML = `✅ ${pgfnDevedores.length} devedor(es) importado(s) (linhas sem CNPJ/CPF válido foram descartadas).`;
-  pgfnPopulateSetorFiltro();
-  pgfnApplyFilters();
-  showToast(pgfnDevedores.length + ' devedores importados');
+  const n = pgfnImportar(mapping);
+  document.getElementById('pgfn-import-status').innerHTML = `✅ ${n} devedor(es) importado(s) (linhas sem CNPJ/CPF válido foram descartadas).`;
 }
 
 function pgfnParseValorBR(str) {
@@ -1132,13 +1179,22 @@ function pgfnFormatCnpjCpf(doc) {
 
 function pgfnFormatBRL(v) { return (v||0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 
+function pgfnParseValorFiltro(str) {
+  // Campo de filtro (piso/teto) é texto livre — usuário pode digitar "100.000",
+  // "100000" ou "R$ 100.000". Como não há centavos relevantes aqui, extrai só os
+  // dígitos (evita a ambiguidade do <input type="number">, que trata "." como
+  // separador decimal e interpretaria "100.000" como 100).
+  const digitos = String(str || '').replace(/\D/g, '');
+  return digitos ? parseInt(digitos, 10) : 0;
+}
+
 function pgfnApplyFilters() {
   const uf = document.getElementById('pgfn-f-uf').value;
   const tipo = document.getElementById('pgfn-f-tipo').value;
   const setor = document.getElementById('pgfn-f-setor').value;
-  const min = parseFloat(document.getElementById('pgfn-f-min').value) || 0;
+  const min = pgfnParseValorFiltro(document.getElementById('pgfn-f-min').value);
   const maxRaw = document.getElementById('pgfn-f-max').value;
-  const max = maxRaw ? parseFloat(maxRaw) : Infinity;
+  const max = maxRaw.trim() ? pgfnParseValorFiltro(maxRaw) : Infinity;
 
   pgfnFiltered = pgfnDevedores.filter(d => (!uf || d.uf === uf) && (!tipo || d.tipo === tipo) && (!setor || d.setor === setor) && d.valor >= min && d.valor <= max);
   pgfnPage = 1;
@@ -1189,8 +1245,8 @@ async function pgfnVerProcessos(idx, btn) {
   cell.innerHTML = '<span class="spinner" style="border-color:var(--border);border-top-color:var(--accent)"></span>';
   try {
     const res = await fetch(`${BACKEND_URL}/api/datajud/search?cnpj=${d.cnpj}`, { method: 'GET' });
-    if (!res.ok) throw new Error('Falha na consulta');
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Falha na consulta (HTTP ${res.status})`);
     const hits = data.hits?.hits || [];
     d._processos = hits.map(h => ({ ...h._source, _tribunal: h._tribunal || '' }));
     const temAdvogado = d._processos.some(p => pgfnTemAdvogado(p));
@@ -1198,7 +1254,8 @@ async function pgfnVerProcessos(idx, btn) {
     else if (temAdvogado) cell.innerHTML = `<span class="tag tag-amber" style="cursor:pointer" title="Detecção automática — confirme no processo" onclick="pgfnMostrarProcessos(${idx})">⚠ ${hits.length} proc. · advogado</span>`;
     else cell.innerHTML = `<span class="tag tag-green" style="cursor:pointer" onclick="pgfnMostrarProcessos(${idx})">${hits.length} processo(s)</span>`;
   } catch (e) {
-    cell.innerHTML = '<button class="copy-btn" onclick="pgfnVerProcessos(' + idx + ', this)">Tentar de novo</button>';
+    const msgSegura = (e.message || 'erro desconhecido').replace(/"/g, '&quot;');
+    cell.innerHTML = `<button class="copy-btn" style="color:var(--danger);border-color:var(--danger)" onclick="pgfnVerProcessos(${idx}, this)" title="${msgSegura}">⚠ Erro — tentar de novo</button>`;
     showToast('Erro ao consultar DataJud: ' + e.message);
   }
 }
