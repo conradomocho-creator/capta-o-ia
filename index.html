@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Captação IA — Escritório de Advocacia</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -69,6 +70,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .btn-primary { background: var(--accent); color: white; }
 .btn-primary:hover { opacity: 0.88; }
 .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--surface-2); color: var(--text-primary); }
 .btn-green { background: #25D366; color: white; }
@@ -193,6 +195,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <nav class="sidebar-nav">
       <div class="nav-item active" onclick="switchView('novo');closeSidebar()" id="nav-novo">✦ Novo lead</div>
       <div class="nav-item" onclick="switchView('dashboard');closeSidebar()" id="nav-dashboard">▦ Painel do sócio</div>
+      <div class="nav-item" onclick="switchView('pgfn');closeSidebar()" id="nav-pgfn">⚖ Prospecção PGFN</div>
     </nav>
   </aside>
 
@@ -396,6 +399,89 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
           </div>
           <div id="leads-wrap"><div class="empty">Nenhum lead salvo ainda.<br>Gere e salve o primeiro.</div></div>
         </div>
+      </div>
+    </div>
+
+    <!-- PGFN -->
+    <div class="view" id="view-pgfn">
+      <div class="topbar">
+        <button class="topbar-menu" onclick="openSidebar()">☰</button>
+        <div class="topbar-info">
+          <div class="topbar-title">Prospecção PGFN</div>
+          <div class="topbar-sub">Importe a lista de devedores da PGFN e cruze com processos judiciais</div>
+        </div>
+      </div>
+      <div class="content" style="max-width:1100px">
+
+        <div class="card">
+          <div class="card-title">📥 Importar lista de devedores</div>
+          <p style="font-size:12px;color:var(--text-secondary);margin-bottom:0.75rem;line-height:1.6">
+            A busca ao vivo na API da PGFN é bloqueada por CAPTCHA (reCAPTCHA/hCaptcha vinculados ao domínio da PGFN).
+            Faça a consulta com os filtros desejados direto no site oficial (Estado, valor, tipo de dívida, CNAE),
+            baixe o resultado (.zip) e importe o arquivo aqui.
+            <a href="https://www.listadevedores.pgfn.gov.br/" target="_blank" rel="noopener" style="color:var(--accent);font-weight:500">Abrir site da PGFN ↗</a>
+          </p>
+          <input type="file" class="form-input" id="pgfn-file-input" accept=".zip,.csv,text/csv,application/zip" onchange="pgfnHandleFile(event)">
+          <div class="cnpj-status" id="pgfn-import-status"></div>
+          <div id="pgfn-mapping-box" style="display:none;margin-top:0.75rem;border-top:1px solid var(--border);padding-top:0.75rem">
+            <div class="form-label" style="margin-bottom:0.5rem">Confirme quais colunas do arquivo correspondem a cada campo:</div>
+            <div class="form-grid" id="pgfn-mapping-fields"></div>
+            <div class="action-row" style="margin-top:0.75rem">
+              <span class="action-hint" id="pgfn-mapping-hint"></span>
+              <button class="btn btn-primary" onclick="pgfnConfirmImport()">Confirmar importação</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="pgfn-filtros-card" style="display:none">
+          <div class="card-title">🔍 Filtrar lista importada <span class="tag tag-blue" id="pgfn-total-tag">0 registros</span></div>
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">Estado (UF)</label>
+              <select class="form-select" id="pgfn-f-uf" onchange="pgfnApplyFilters()"><option value="">Todos</option></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tipo de dívida</label>
+              <select class="form-select" id="pgfn-f-tipo" onchange="pgfnApplyFilters()">
+                <option value="">Todos</option>
+                <option value="FGTS">FGTS</option>
+                <option value="PREVIDENCIARIO">Previdenciário</option>
+                <option value="NAO_PREVIDENCIARIO">Não Previdenciário</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Valor mínimo (R$)</label>
+              <input class="form-input" type="number" min="0" id="pgfn-f-min" placeholder="0" oninput="pgfnApplyFilters()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Valor máximo (R$)</label>
+              <input class="form-input" type="number" min="0" id="pgfn-f-max" placeholder="Sem limite" oninput="pgfnApplyFilters()">
+            </div>
+            <div class="form-group full">
+              <label class="form-label">Setor (CNAE)</label>
+              <select class="form-select" id="pgfn-f-setor" onchange="pgfnApplyFilters()"><option value="">Todos</option></select>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" id="pgfn-resultados-card" style="padding:0;overflow:hidden;display:none">
+          <div style="padding:1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+            <span style="font-size:13px;font-weight:600">Devedores</span>
+            <span id="pgfn-count" class="tag tag-blue">0</span>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="leads-table" id="pgfn-table">
+              <thead><tr><th>Empresa</th><th>CNPJ</th><th>UF</th><th>Valor da dívida</th><th>Tipo</th><th>Processos</th><th></th></tr></thead>
+              <tbody id="pgfn-tbody"></tbody>
+            </table>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;gap:0.75rem;padding:0.75rem;border-top:1px solid var(--border)">
+            <button class="btn btn-ghost" onclick="pgfnGoToPage(pgfnPage-1)" id="pgfn-prev">← Anterior</button>
+            <span style="font-size:12px;color:var(--text-secondary)" id="pgfn-page-label">Página 1</span>
+            <button class="btn btn-ghost" onclick="pgfnGoToPage(pgfnPage+1)" id="pgfn-next">Próxima →</button>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -857,6 +943,321 @@ function showToast(msg) {
   t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),2200);
 }
+
+// ================= PGFN — Prospecção =================
+const UF_LIST = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+const PGFN_CNAE_SETORES = ['Restaurantes e alimentação','Hotelaria e turismo','Construção civil','Incorporação imobiliária','Hospitais e clínicas','Farmacêutico','Software e SaaS','Bancos e financeiras','Seguradoras','Logística e transporte','Varejo','Educação','Agronegócio','Indústria manufatureira','Mineração e energia'];
+const PGFN_TIPO_LABEL = { FGTS: 'FGTS', PREVIDENCIARIO: 'Previdenciário', NAO_PREVIDENCIARIO: 'Não Previdenciário' };
+const PGFN_TIPO_TAG = { FGTS: 'tag-amber', PREVIDENCIARIO: 'tag-blue', NAO_PREVIDENCIARIO: 'tag-green' };
+const PGFN_PAGE_SIZE = 20;
+const PGFN_CAMPOS_OBRIGATORIOS = [['nome','Nome / Razão social'],['cnpj','CNPJ ou CPF'],['uf','UF'],['valor','Valor da dívida'],['tipo','Tipo / Natureza da dívida']];
+const PGFN_CAMPOS_OPCIONAIS = [['fantasia','Nome fantasia'],['municipio','Município'],['cnae','Atividade / CNAE']];
+
+let pgfnDevedores = [], pgfnFiltered = [], pgfnPage = 1;
+let pgfnRawHeaders = [], pgfnRawRows = [], pgfnMapping = {};
+
+function pgfnInitFiltros() {
+  const ufSel = document.getElementById('pgfn-f-uf');
+  if (ufSel && ufSel.options.length <= 1) {
+    UF_LIST.forEach(uf => { const o = document.createElement('option'); o.value = uf; o.textContent = uf; ufSel.appendChild(o); });
+  }
+}
+
+// --- Leitura do arquivo (.zip ou .csv) ---
+async function pgfnHandleFile(ev) {
+  const file = ev.target.files?.[0];
+  const status = document.getElementById('pgfn-import-status');
+  document.getElementById('pgfn-mapping-box').style.display = 'none';
+  if (!file) return;
+  status.textContent = '🔄 Lendo arquivo...'; status.style.color = 'var(--text-muted)';
+  try {
+    let csvText = '';
+    const isZip = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip';
+    if (isZip) {
+      if (typeof JSZip === 'undefined') throw new Error('Biblioteca de leitura de .zip não carregou. Extraia o CSV manualmente e importe o .csv.');
+      const buf = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(buf);
+      const csvEntry = Object.values(zip.files).find(f => !f.dir && /\.csv$/i.test(f.name));
+      if (!csvEntry) throw new Error('Nenhum arquivo .csv encontrado dentro do .zip.');
+      csvText = await csvEntry.async('string');
+    } else {
+      csvText = await file.text();
+    }
+    csvText = csvText.replace(/^﻿/, ''); // remove BOM
+    const parsed = pgfnParseCsv(csvText);
+    if (!parsed.headers.length || !parsed.rows.length) throw new Error('Não foi possível identificar linhas/colunas no arquivo.');
+    pgfnRawHeaders = parsed.headers;
+    pgfnRawRows = parsed.rows;
+    pgfnMapping = pgfnAutoMapColumns(pgfnRawHeaders);
+    pgfnRenderMappingUI();
+    status.innerHTML = `✅ ${parsed.rows.length} linha(s) lida(s), ${parsed.headers.length} coluna(s). Confira o mapeamento abaixo e confirme.`;
+    status.style.color = 'var(--success)';
+  } catch (e) {
+    status.textContent = '❌ ' + e.message;
+    status.style.color = 'var(--danger)';
+  }
+}
+
+function pgfnParseCsv(text) {
+  const lines = text.split(/\r\n|\n|\r/).filter(l => l.trim() !== '');
+  if (!lines.length) return { headers: [], rows: [] };
+  const candidatos = [';', ',', '\t']; // exportações brasileiras costumam usar ';'
+  const delim = candidatos.reduce((melhor, d) => (lines[0].split(d).length > lines[0].split(melhor).length ? d : melhor), candidatos[0]);
+
+  function parseLine(line) {
+    const out = []; let cur = ''; let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"') { if (line[i+1] === '"') { cur += '"'; i++; } else { inQuotes = false; } }
+        else cur += ch;
+      } else {
+        if (ch === '"') inQuotes = true;
+        else if (ch === delim) { out.push(cur); cur = ''; }
+        else cur += ch;
+      }
+    }
+    out.push(cur);
+    return out.map(s => s.trim());
+  }
+
+  const headers = parseLine(lines[0]);
+  const rows = lines.slice(1).map(parseLine);
+  return { headers, rows };
+}
+
+function pgfnNormalizeHeader(h) {
+  return (h || '').toString().toLowerCase().normalize('NFD').replace(/\p{Mark}/gu, '').replace(/[^a-z0-9]/g, '');
+}
+
+function pgfnAutoMapColumns(headers) {
+  const norm = headers.map(pgfnNormalizeHeader);
+  const candidatos = {
+    nome: ['razaosocial','nomeempresarial','nome','devedor','nomedevedor'],
+    fantasia: ['nomefantasia','fantasia'],
+    cnpj: ['cnpj','cpfcnpj','cnpjcpf','documento','inscricao','ni'],
+    uf: ['uf','estado','siglauf','ufdevedor'],
+    valor: ['valorconsolidado','valortotal','valordadivida','valor','totaldevido','valordevido'],
+    tipo: ['natureza','naturezadebito','naturezadadivida','tipodedebito','tipodevedor','tipo'],
+    municipio: ['municipio','cidade','nomemunicipio'],
+    cnae: ['cnae','atividadeeconomica','descricaocnae','atividade']
+  };
+  const mapping = {};
+  for (const campo in candidatos) {
+    let achou = -1;
+    for (const cand of candidatos[campo]) { const i = norm.findIndex(h => h === cand); if (i !== -1) { achou = i; break; } }
+    if (achou === -1) { for (const cand of candidatos[campo]) { const i = norm.findIndex(h => h.includes(cand)); if (i !== -1) { achou = i; break; } } }
+    mapping[campo] = achou;
+  }
+  return mapping;
+}
+
+function pgfnRenderMappingUI() {
+  const box = document.getElementById('pgfn-mapping-box');
+  const fields = document.getElementById('pgfn-mapping-fields');
+  const opcoesHtml = '<option value="-1">— não usar —</option>' + pgfnRawHeaders.map((h,i)=>`<option value="${i}">${h||('coluna '+(i+1))}</option>`).join('');
+  const todosCampos = [...PGFN_CAMPOS_OBRIGATORIOS, ...PGFN_CAMPOS_OPCIONAIS];
+  fields.innerHTML = todosCampos.map(([campo,label]) => `<div class="form-group"><label class="form-label">${label}</label><select class="form-select" id="pgfn-map-${campo}">${opcoesHtml}</select></div>`).join('');
+  todosCampos.forEach(([campo]) => { const sel = document.getElementById('pgfn-map-'+campo); if (sel) sel.value = String(pgfnMapping[campo] ?? -1); });
+  const faltando = PGFN_CAMPOS_OBRIGATORIOS.filter(([campo]) => (pgfnMapping[campo] ?? -1) === -1).map(([,l])=>l);
+  document.getElementById('pgfn-mapping-hint').textContent = faltando.length
+    ? `Não identifiquei automaticamente: ${faltando.join(', ')}. Selecione manualmente.`
+    : 'Mapeamento detectado automaticamente — confira antes de confirmar.';
+  box.style.display = 'block';
+}
+
+function pgfnConfirmImport() {
+  const todosCampos = [...PGFN_CAMPOS_OBRIGATORIOS, ...PGFN_CAMPOS_OPCIONAIS];
+  const mapping = {};
+  todosCampos.forEach(([campo]) => { const sel = document.getElementById('pgfn-map-'+campo); mapping[campo] = sel ? parseInt(sel.value, 10) : -1; });
+  const faltando = PGFN_CAMPOS_OBRIGATORIOS.filter(([campo]) => mapping[campo] === -1);
+  if (faltando.length) { showToast('Selecione a coluna de: ' + faltando.map(f=>f[1]).join(', ')); return; }
+
+  pgfnDevedores = pgfnRawRows.map(row => {
+    const get = (campo) => mapping[campo] >= 0 ? (row[mapping[campo]] || '') : '';
+    const cnpjLimpo = get('cnpj').replace(/\D/g,'');
+    return {
+      nome: get('nome') || get('fantasia') || 'Empresa sem nome',
+      fantasia: get('fantasia'),
+      cnpj: cnpjLimpo,
+      isCnpj: cnpjLimpo.length === 14,
+      uf: get('uf').toUpperCase().trim(),
+      valor: pgfnParseValorBR(get('valor')),
+      tipoRaw: get('tipo'),
+      tipo: pgfnClassificarTipo(get('tipo')),
+      municipio: get('municipio'),
+      cnae: get('cnae'),
+      setor: cnaeParaSetor('', get('cnae')),
+    };
+  }).filter(d => d.cnpj);
+
+  document.getElementById('pgfn-mapping-box').style.display = 'none';
+  document.getElementById('pgfn-filtros-card').style.display = 'block';
+  document.getElementById('pgfn-resultados-card').style.display = 'block';
+  document.getElementById('pgfn-import-status').innerHTML = `✅ ${pgfnDevedores.length} devedor(es) importado(s) (linhas sem CNPJ/CPF válido foram descartadas).`;
+  pgfnPopulateSetorFiltro();
+  pgfnApplyFilters();
+  showToast(pgfnDevedores.length + ' devedores importados');
+}
+
+function pgfnParseValorBR(str) {
+  if (!str) return 0;
+  let s = String(str).trim().replace(/[R$\s]/g,'');
+  if (/,\d{1,2}$/.test(s)) { s = s.replace(/\./g,'').replace(',', '.'); } else { s = s.replace(/,/g,''); }
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+function pgfnClassificarTipo(raw) {
+  const s = (raw||'').toLowerCase().normalize('NFD').replace(/\p{Mark}/gu, ''); // remove acentos p/ comparar "nao"
+  if (s.includes('fgts')) return 'FGTS';
+  if (s.includes('nao previdenc') || s.includes('naoprevidenc')) return 'NAO_PREVIDENCIARIO';
+  if (s.includes('previdenc')) return 'PREVIDENCIARIO';
+  return 'NAO_PREVIDENCIARIO';
+}
+
+function pgfnPopulateSetorFiltro() {
+  const sel = document.getElementById('pgfn-f-setor');
+  const atuais = new Set(Array.from(sel.options).map(o=>o.value).filter(Boolean));
+  const setoresDados = new Set(pgfnDevedores.map(d=>d.setor).filter(Boolean));
+  new Set([...PGFN_CNAE_SETORES, ...setoresDados]).forEach(s => { if (!atuais.has(s)) { const o=document.createElement('option'); o.value=s; o.textContent=s; sel.appendChild(o); } });
+}
+
+function pgfnFormatCnpjCpf(doc) {
+  if (!doc) return '—';
+  if (doc.length === 14) return doc.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  if (doc.length === 11) return doc.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  return doc;
+}
+
+function pgfnFormatBRL(v) { return (v||0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+
+function pgfnApplyFilters() {
+  const uf = document.getElementById('pgfn-f-uf').value;
+  const tipo = document.getElementById('pgfn-f-tipo').value;
+  const setor = document.getElementById('pgfn-f-setor').value;
+  const min = parseFloat(document.getElementById('pgfn-f-min').value) || 0;
+  const maxRaw = document.getElementById('pgfn-f-max').value;
+  const max = maxRaw ? parseFloat(maxRaw) : Infinity;
+
+  pgfnFiltered = pgfnDevedores.filter(d => (!uf || d.uf === uf) && (!tipo || d.tipo === tipo) && (!setor || d.setor === setor) && d.valor >= min && d.valor <= max);
+  pgfnPage = 1;
+  document.getElementById('pgfn-total-tag').textContent = pgfnFiltered.length + ' registro(s)';
+  pgfnRenderTable();
+}
+
+function pgfnRenderTable() {
+  const tbody = document.getElementById('pgfn-tbody');
+  const totalPaginas = Math.max(1, Math.ceil(pgfnFiltered.length / PGFN_PAGE_SIZE));
+  if (pgfnPage > totalPaginas) pgfnPage = totalPaginas;
+  const inicio = (pgfnPage - 1) * PGFN_PAGE_SIZE;
+  const pagina = pgfnFiltered.slice(inicio, inicio + PGFN_PAGE_SIZE);
+
+  document.getElementById('pgfn-count').textContent = pgfnFiltered.length;
+  document.getElementById('pgfn-page-label').textContent = `Página ${pgfnPage} de ${totalPaginas}`;
+  document.getElementById('pgfn-prev').disabled = pgfnPage <= 1;
+  document.getElementById('pgfn-next').disabled = pgfnPage >= totalPaginas;
+
+  if (!pagina.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:2rem">Nenhum devedor encontrado com esses filtros.</td></tr>'; return; }
+
+  tbody.innerHTML = pagina.map(d => {
+    const idx = pgfnDevedores.indexOf(d);
+    return `<tr>
+      <td><strong>${d.fantasia || d.nome}</strong>${d.municipio ? `<div style="font-size:11px;color:var(--text-muted)">${d.municipio}${d.uf?'/'+d.uf:''}</div>` : ''}</td>
+      <td>${pgfnFormatCnpjCpf(d.cnpj)}</td>
+      <td>${d.uf || '—'}</td>
+      <td>${pgfnFormatBRL(d.valor)}</td>
+      <td><span class="tag ${PGFN_TIPO_TAG[d.tipo]||'tag-blue'}">${PGFN_TIPO_LABEL[d.tipo]||d.tipoRaw||'—'}</span></td>
+      <td id="pgfn-proc-${idx}"><button class="copy-btn" onclick="pgfnVerProcessos(${idx}, this)">Ver processos</button></td>
+      <td><button class="btn btn-ghost" style="padding:0.3rem 0.6rem;font-size:11px" onclick="pgfnGerarMaterial(${idx})">Gerar material</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function pgfnGoToPage(n) {
+  const totalPaginas = Math.max(1, Math.ceil(pgfnFiltered.length / PGFN_PAGE_SIZE));
+  if (n < 1 || n > totalPaginas) return;
+  pgfnPage = n;
+  pgfnRenderTable();
+}
+
+// --- Ver processos (DataJud) — verifica advogado constituído ---
+async function pgfnVerProcessos(idx, btn) {
+  const d = pgfnDevedores[idx];
+  if (!d || !d.isCnpj) { showToast('Sem CNPJ válido para consultar'); return; }
+  const cell = document.getElementById('pgfn-proc-' + idx);
+  cell.innerHTML = '<span class="spinner" style="border-color:var(--border);border-top-color:var(--accent)"></span>';
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/datajud/search?cnpj=${d.cnpj}`, { method: 'GET' });
+    if (!res.ok) throw new Error('Falha na consulta');
+    const data = await res.json();
+    const hits = data.hits?.hits || [];
+    d._processos = hits.map(h => ({ ...h._source, _tribunal: h._tribunal || '' }));
+    const temAdvogado = d._processos.some(p => pgfnTemAdvogado(p));
+    if (!hits.length) cell.innerHTML = '<span class="tag tag-blue" style="cursor:default">Nenhum processo</span>';
+    else if (temAdvogado) cell.innerHTML = `<span class="tag tag-amber" style="cursor:pointer" title="Detecção automática — confirme no processo" onclick="pgfnMostrarProcessos(${idx})">⚠ ${hits.length} proc. · advogado</span>`;
+    else cell.innerHTML = `<span class="tag tag-green" style="cursor:pointer" onclick="pgfnMostrarProcessos(${idx})">${hits.length} processo(s)</span>`;
+  } catch (e) {
+    cell.innerHTML = '<button class="copy-btn" onclick="pgfnVerProcessos(' + idx + ', this)">Tentar de novo</button>';
+    showToast('Erro ao consultar DataJud: ' + e.message);
+  }
+}
+
+function pgfnTemAdvogado(source) {
+  // Heurística: procura recursivamente qualquer chave contendo "advogado" com conteúdo.
+  // O schema do DataJud varia por tribunal — sempre confirme manualmente no processo.
+  function busca(obj, depth) {
+    if (!obj || depth > 4 || typeof obj !== 'object') return false;
+    for (const k in obj) {
+      if (/advogad/i.test(k)) {
+        const v = obj[k];
+        if (Array.isArray(v) && v.length) return true;
+        if (v && typeof v === 'object' && Object.keys(v).length) return true;
+        if (typeof v === 'string' && v.trim()) return true;
+      }
+      if (obj[k] && typeof obj[k] === 'object' && busca(obj[k], depth+1)) return true;
+    }
+    return false;
+  }
+  return busca(source, 0);
+}
+
+function pgfnMostrarProcessos(idx) {
+  const d = pgfnDevedores[idx];
+  if (!d?._processos?.length) return;
+  document.getElementById('modal-emp').textContent = d.fantasia || d.nome;
+  document.getElementById('modal-meta').textContent = [pgfnFormatCnpjCpf(d.cnpj), d.uf].filter(Boolean).join(' · ');
+  let html = '<div class="modal-section"><div class="modal-section-label">⚖️ Processos judiciais (DataJud)</div><div class="processos-box">';
+  html += d._processos.map(p => {
+    const num = p.dadosBasicos?.numeroProcessoUnico || p.numero || '—';
+    const classe = p.dadosBasicos?.classeProcessual?.nome || '—';
+    const orgao = p.dadosBasicos?.orgaoJulgador?.nome || '—';
+    const tribunal = p._tribunal || '';
+    const advogado = pgfnTemAdvogado(p) ? '<span class="tag tag-amber" style="margin-left:4px">advogado constituído</span>' : '';
+    return `<div class="processo-item"><div class="processo-numero">${num} ${tribunal?`<span style="font-size:10px;color:var(--accent);background:var(--accent-bg);padding:1px 6px;border-radius:4px;margin-left:4px">${tribunal}</span>`:''}${advogado}</div><div class="processo-detalhe"><strong>Classe:</strong> ${classe}<br><strong>Órgão:</strong> ${orgao}</div></div>`;
+  }).join('');
+  html += '</div><div style="font-size:11px;color:var(--text-muted);margin-top:6px">Detecção de advogado é heurística (varre o processo por campos "advogado") — confirme sempre no processo original.</div></div>';
+  document.getElementById('modal-body').innerHTML = html;
+  document.getElementById('modal').classList.add('show');
+}
+
+// --- Gerar material a partir de um devedor PGFN ---
+function pgfnGerarMaterial(idx) {
+  const d = pgfnDevedores[idx];
+  if (!d) return;
+  switchView('novo'); closeSidebar();
+  resetForm();
+  document.getElementById('inp-empresa').value = d.fantasia || d.nome;
+  if (d.isCnpj) document.getElementById('inp-cnpj').value = pgfnFormatCnpjCpf(d.cnpj);
+  if (d.setor) { const sel = document.getElementById('inp-setor'); for (const o of sel.options) { if (o.text === d.setor) { sel.value = o.value; break; } } }
+  const linhas = [`Dívida ativa da União (PGFN): ${pgfnFormatBRL(d.valor)} — ${PGFN_TIPO_LABEL[d.tipo]||d.tipoRaw||'natureza não informada'}.`];
+  if (d.municipio || d.uf) linhas.push(`Sede: ${d.municipio||''}${d.uf?'/'+d.uf:''}`);
+  document.getElementById('inp-contexto').value = linhas.join(' ');
+  showToast('Formulário preenchido com dados da PGFN');
+  if (d.isCnpj) buscarCNPJ(); // enriquece com Receita Federal e já busca processos judiciais
+}
+
+pgfnInitFiltros();
 </script>
 </body>
 </html>
