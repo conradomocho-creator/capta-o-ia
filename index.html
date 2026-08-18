@@ -343,7 +343,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
           <!-- PROCESSOS -->
           <div class="output-section" id="processos-section" style="display:none">
             <div class="output-section-header">
-              <span class="output-section-label">⚖️ Processos judiciais (DataJud)</span>
+              <span class="output-section-label">⚖️ Processos judiciais</span>
               <span id="processos-count" style="font-size:11px;color:var(--text-muted)"></span>
             </div>
             <div class="processos-box" id="out-processos"></div>
@@ -596,8 +596,8 @@ async function buscarCNPJ() {
     status.innerHTML = `✅ <strong>${fantasia||nome}</strong> — ${atvPrincipal||'sem atividade'} — ${cidade}/${estado}${socios.length?' — '+socios.length+' sócio(s)':''}`;
     status.style.color = 'var(--success)';
 
-    // Busca processos DataJud em paralelo
-    buscarProcessos(cnpj, fantasia || nome);
+    // Prepara link de busca manual de processos (ver comentário em prepararLinkProcessos)
+    prepararLinkProcessos(cnpj, fantasia || nome);
   } catch(e) {
     status.textContent = '❌ '+e.message+'. Preencha manualmente.';
     status.style.color = 'var(--danger)';
@@ -621,41 +621,35 @@ function cnaeParaSetor(cnae, descricao) {
   return '';
 }
 
-// DATAJUD
-let processosEncontrados = [];
-async function buscarProcessos(cnpj, nomeEmpresa) {
-  processosEncontrados = [];
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/datajud/search?cnpj=${cnpj}`, { method: 'GET' });
-    if (res.ok) {
-      const data = await res.json();
-      processosEncontrados = (data.hits?.hits || []).map(h => ({ ...h._source, _tribunal: h._tribunal || '' })).slice(0, 8);
-    }
-  } catch(e) {
-    console.log('DataJud error:', e);
-  }
-  window._processos = processosEncontrados;
+// PROCESSOS JUDICIAIS
+// A API pública do DataJud não expõe nome/CNPJ/OAB de partes em nenhum campo,
+// em nenhum tribunal (confirmado inspecionando documentos reais de TJSP e TRF3
+// — só existem dados processuais: número, classe, movimentos, assuntos, nada de
+// quem é parte, por LGPD). Buscar processos por empresa programaticamente não é
+// possível com essa API pública. Em vez de fingir que funciona, mostramos um
+// link para busca manual no JusBrasil (agrega processos de vários tribunais,
+// pesquisável por nome ou CNPJ), com o nome da empresa já preenchido — CNPJ
+// formatado como fallback se por algum motivo não houver nome.
+function linkBuscaJusBrasil(nome, cnpj) {
+  const termo = (nome || '').trim() || pgfnFormatCnpjCpf(cnpj);
+  return `https://www.jusbrasil.com.br/busca?q=${encodeURIComponent(termo)}`;
 }
 
-function renderProcessos(processos) {
+function prepararLinkProcessos(cnpj, nomeEmpresa) {
+  window._processosLink = linkBuscaJusBrasil(nomeEmpresa, cnpj);
+}
+
+function renderProcessos(link) {
   const section = document.getElementById('processos-section');
   const box = document.getElementById('out-processos');
   const count = document.getElementById('processos-count');
-  if (!processos || processos.length === 0) { section.style.display = 'none'; return; }
+  if (!link) { section.style.display = 'none'; return; }
   section.style.display = 'block';
-  count.textContent = processos.length + ' processo(s) encontrado(s)';
-  box.innerHTML = processos.map(p => {
-    const num = p.dadosBasicos?.numeroProcessoUnico || p.numero || '—';
-    const classe = p.dadosBasicos?.classeProcessual?.nome || '—';
-    const assuntos = (p.dadosBasicos?.assunto||[]).map(a=>a.nome||'').filter(Boolean).join(', ') || '—';
-    const orgao = p.dadosBasicos?.orgaoJulgador?.nome || '—';
-    const data = p.dadosBasicos?.dataAjuizamento ? new Date(p.dadosBasicos.dataAjuizamento).toLocaleDateString('pt-BR') : '—';
-    const tribunal = p._tribunal || '';
-    return `<div class="processo-item">
-      <div class="processo-numero">${num} ${tribunal ? '<span style="font-size:10px;color:var(--accent);background:var(--accent-bg);padding:1px 6px;border-radius:4px;margin-left:4px">'+tribunal+'</span>' : ''}</div>
-      <div class="processo-detalhe"><strong>Classe:</strong> ${classe}<br><strong>Assunto:</strong> ${assuntos}<br><strong>Órgão:</strong> ${orgao} | <strong>Ajuizado em:</strong> ${data}</div>
-    </div>`;
-  }).join('');
+  count.textContent = '';
+  box.innerHTML = `<div class="processo-item">
+    <div class="processo-detalhe">A API pública do DataJud não permite buscar processos por nome/CNPJ (restrição de LGPD). Confira manualmente:</div>
+    <a href="${link}" target="_blank" rel="noopener" class="copy-btn" style="text-decoration:none;display:inline-block;margin-top:8px">🔍 Ver processos no JusBrasil</a>
+  </div>`;
 }
 
 // RENDER
@@ -759,13 +753,13 @@ Responda SOMENTE JSON puro, sem markdown:
     renderBriefing(parsed);
     renderScript(parsed);
 
-    // Renderiza processos se encontrados
-    if(window._processos?.length) renderProcessos(window._processos);
+    // Mostra o link de busca manual de processos (JusBrasil), se preparado
+    if(window._processosLink) renderProcessos(window._processosLink);
 
     emailsGerados=parsed.emails||[];emailAtivo=0;renderEmail(0);updateTabs();
     document.getElementById('output-area').style.display='block';
-    leadAtual={empresa,setor,porte,contato,cargo,canal,area,tom:tomAtivo,data_lead:parsed,processos:window._processos||[],status:'Gerado',data:new Date().toLocaleDateString('pt-BR')};
-    window._processos=[];
+    leadAtual={empresa,setor,porte,contato,cargo,canal,area,tom:tomAtivo,data_lead:parsed,processosLink:window._processosLink||null,status:'Gerado',data:new Date().toLocaleDateString('pt-BR')};
+    window._processosLink=null;
   } catch(err) {
     document.getElementById('loading-box').classList.remove('show');
     document.getElementById('form-card').style.display='block';
@@ -896,7 +890,7 @@ function resetForm() {
   document.getElementById('cnpj-status').textContent='';
   ['inp-empresa','inp-contato','inp-cargo','inp-contexto','inp-cnpj'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   ['inp-setor','inp-porte','inp-canal','inp-area'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  window._processos=[];
+  window._processosLink=null;
   const btnVoltar = document.getElementById('btn-voltar-pgfn');
   if (btnVoltar) btnVoltar.style.display = 'none';
 }
@@ -1298,8 +1292,7 @@ function pgfnGoToPage(n) {
 // aba, com o nome da empresa já preenchido — CNPJ formatado como fallback se por
 // algum motivo não houver nome.
 function pgfnLinkBuscaProcessos(d) {
-  const termo = (d.fantasia || d.nome || '').trim() || pgfnFormatCnpjCpf(d.cnpj);
-  return `https://www.jusbrasil.com.br/busca?q=${encodeURIComponent(termo)}`;
+  return linkBuscaJusBrasil(d.fantasia || d.nome, d.cnpj);
 }
 
 // --- Gerar material a partir de um devedor PGFN ---
