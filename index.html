@@ -1275,7 +1275,7 @@ function pgfnRenderTable() {
       <td>${d.uf || '—'}</td>
       <td>${pgfnFormatBRL(d.valor)}</td>
       <td><span class="tag ${PGFN_TIPO_TAG[d.tipo]||'tag-blue'}">${PGFN_TIPO_LABEL[d.tipo]||d.tipoRaw||'—'}</span></td>
-      <td id="pgfn-proc-${idx}"><button class="copy-btn" onclick="pgfnVerProcessos(${idx}, this)">Ver processos</button></td>
+      <td><a href="${pgfnLinkBuscaProcessos(d)}" target="_blank" rel="noopener" class="copy-btn" style="text-decoration:none;display:inline-block" title="Abre busca por processos no JusBrasil em nova aba (a API pública do DataJud não permite buscar por nome/CNPJ)">🔍 Ver processos</a></td>
       <td><button class="btn btn-ghost" style="padding:0.3rem 0.6rem;font-size:11px" onclick="pgfnGerarMaterial(${idx})">Gerar material</button></td>
     </tr>`;
   }).join('');
@@ -1288,96 +1288,18 @@ function pgfnGoToPage(n) {
   pgfnRenderTable();
 }
 
-// --- Ver processos (DataJud) — verifica advogado constituído ---
-async function pgfnVerProcessos(idx, btn) {
-  const d = pgfnDevedores[idx];
-  const cell = document.getElementById('pgfn-proc-' + idx);
-  if (!d || !cell) return;
-
-  // Garante que só dígitos vão pro backend, sem máscara (independente do que
-  // esteja armazenado em d.cnpj — defensivo, mesmo já vindo limpo da importação).
-  const cnpjLimpo = String(d.cnpj || '').replace(/\D/g, '');
-  if (cnpjLimpo.length !== 14) {
-    cell.innerHTML = `<span class="tag tag-amber" style="cursor:default" title="Valor de CNPJ: '${(d.cnpj||'').replace(/"/g,'&quot;')}'">CNPJ inválido para consulta</span>`;
-    showToast('CNPJ inválido para consultar processos: ' + (d.cnpj || '(vazio)'));
-    return;
-  }
-
-  cell.innerHTML = '<span class="spinner" style="border-color:var(--border);border-top-color:var(--accent)"></span>';
-  const url = `${BACKEND_URL}/api/datajud/search?cnpj=${cnpjLimpo}`;
-  console.log('[PGFN] Consultando DataJud:', url);
-  try {
-    const res = await fetch(url, { method: 'GET' });
-    let data = {};
-    try { data = await res.json(); } catch (e) {}
-    console.log('[PGFN] Resposta DataJud (status ' + res.status + '):', data);
-    if (!res.ok) throw new Error(data.error || `Falha na consulta (HTTP ${res.status})`);
-
-    const hits = Array.isArray(data.hits?.hits) ? data.hits.hits : [];
-    d._processos = hits.map(h => ({ ...h._source, _tribunal: h._tribunal || '' }));
-
-    if (!hits.length) {
-      cell.innerHTML = '<span class="tag tag-blue" style="cursor:default">Nenhum processo encontrado no DataJud</span>';
-      return;
-    }
-
-    const temAdvogado = d._processos.some(p => pgfnTemAdvogado(p));
-    const resumo = d._processos.slice(0, 3).map(p => {
-      const num = p.dadosBasicos?.numeroProcessoUnico || p.numero || '—';
-      const tribunal = p._tribunal || '';
-      return `${num}${tribunal ? ' <span style="color:var(--text-muted)">(' + tribunal + ')</span>' : ''}`;
-    }).join('<br>');
-    const resto = hits.length > 3 ? `<br><span style="color:var(--text-muted)">+${hits.length - 3} outro(s)</span>` : '';
-
-    cell.innerHTML = `<div style="font-size:11px;line-height:1.6">
-      <span class="tag ${temAdvogado ? 'tag-amber' : 'tag-green'}" style="cursor:pointer" title="Detecção de advogado é heurística — confirme no processo" onclick="pgfnMostrarProcessos(${idx})">${temAdvogado ? '⚠ ' : ''}${hits.length} processo(s)${temAdvogado ? ' · advogado' : ''}</span>
-      <div style="margin-top:4px;color:var(--text-secondary)">${resumo}${resto}</div>
-    </div>`;
-  } catch (e) {
-    console.error('[PGFN] Erro ao consultar DataJud:', e);
-    const msgSegura = (e.message || 'erro desconhecido').replace(/"/g, '&quot;');
-    const msgCurta = msgSegura.length > 45 ? msgSegura.slice(0, 45) + '…' : msgSegura;
-    cell.innerHTML = `<button class="copy-btn" style="color:var(--danger);border-color:var(--danger);white-space:normal;text-align:left" onclick="pgfnVerProcessos(${idx}, this)" title="${msgSegura}">⚠ ${msgCurta}<br>Tentar de novo</button>`;
-    showToast('Erro ao consultar DataJud: ' + e.message);
-  }
-}
-
-function pgfnTemAdvogado(source) {
-  // Heurística: procura recursivamente qualquer chave contendo "advogado" com conteúdo.
-  // O schema do DataJud varia por tribunal — sempre confirme manualmente no processo.
-  function busca(obj, depth) {
-    if (!obj || depth > 4 || typeof obj !== 'object') return false;
-    for (const k in obj) {
-      if (/advogad/i.test(k)) {
-        const v = obj[k];
-        if (Array.isArray(v) && v.length) return true;
-        if (v && typeof v === 'object' && Object.keys(v).length) return true;
-        if (typeof v === 'string' && v.trim()) return true;
-      }
-      if (obj[k] && typeof obj[k] === 'object' && busca(obj[k], depth+1)) return true;
-    }
-    return false;
-  }
-  return busca(source, 0);
-}
-
-function pgfnMostrarProcessos(idx) {
-  const d = pgfnDevedores[idx];
-  if (!d?._processos?.length) return;
-  document.getElementById('modal-emp').textContent = d.fantasia || d.nome;
-  document.getElementById('modal-meta').textContent = [pgfnFormatCnpjCpf(d.cnpj), d.uf].filter(Boolean).join(' · ');
-  let html = '<div class="modal-section"><div class="modal-section-label">⚖️ Processos judiciais (DataJud)</div><div class="processos-box">';
-  html += d._processos.map(p => {
-    const num = p.dadosBasicos?.numeroProcessoUnico || p.numero || '—';
-    const classe = p.dadosBasicos?.classeProcessual?.nome || '—';
-    const orgao = p.dadosBasicos?.orgaoJulgador?.nome || '—';
-    const tribunal = p._tribunal || '';
-    const advogado = pgfnTemAdvogado(p) ? '<span class="tag tag-amber" style="margin-left:4px">advogado constituído</span>' : '';
-    return `<div class="processo-item"><div class="processo-numero">${num} ${tribunal?`<span style="font-size:10px;color:var(--accent);background:var(--accent-bg);padding:1px 6px;border-radius:4px;margin-left:4px">${tribunal}</span>`:''}${advogado}</div><div class="processo-detalhe"><strong>Classe:</strong> ${classe}<br><strong>Órgão:</strong> ${orgao}</div></div>`;
-  }).join('');
-  html += '</div><div style="font-size:11px;color:var(--text-muted);margin-top:6px">Detecção de advogado é heurística (varre o processo por campos "advogado") — confirme sempre no processo original.</div></div>';
-  document.getElementById('modal-body').innerHTML = html;
-  document.getElementById('modal').classList.add('show');
+// --- Ver processos ---
+// A API pública do DataJud NÃO expõe nome/CNPJ/OAB de partes em nenhum campo
+// (confirmado inspecionando documentos reais de TJSP e TRF3 — só existem dados
+// processuais: número, classe, movimentos, assuntos — nada de quem é parte, por
+// LGPD). Buscar processos por empresa programaticamente não é possível com essa
+// API. Em vez de fingir que funciona, o botão abre uma busca manual no JusBrasil
+// (agrega processos de vários tribunais, pesquisável por nome ou CNPJ) numa nova
+// aba, com o nome da empresa já preenchido — CNPJ formatado como fallback se por
+// algum motivo não houver nome.
+function pgfnLinkBuscaProcessos(d) {
+  const termo = (d.fantasia || d.nome || '').trim() || pgfnFormatCnpjCpf(d.cnpj);
+  return `https://www.jusbrasil.com.br/busca?q=${encodeURIComponent(termo)}`;
 }
 
 // --- Gerar material a partir de um devedor PGFN ---
