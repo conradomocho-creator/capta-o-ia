@@ -208,6 +208,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
           <div class="topbar-title">Novo lead</div>
           <div class="topbar-sub">Preencha os dados para gerar o material de abordagem</div>
         </div>
+        <button class="btn btn-ghost" id="btn-voltar-pgfn" style="display:none" onclick="pgfnVoltar()">← Voltar para Prospecção PGFN</button>
       </div>
       <div class="content">
         <div class="card" id="form-card">
@@ -896,6 +897,8 @@ function resetForm() {
   ['inp-empresa','inp-contato','inp-cargo','inp-contexto','inp-cnpj'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   ['inp-setor','inp-porte','inp-canal','inp-area'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   window._processos=[];
+  const btnVoltar = document.getElementById('btn-voltar-pgfn');
+  if (btnVoltar) btnVoltar.style.display = 'none';
 }
 
 // DASHBOARD
@@ -1288,22 +1291,53 @@ function pgfnGoToPage(n) {
 // --- Ver processos (DataJud) — verifica advogado constituído ---
 async function pgfnVerProcessos(idx, btn) {
   const d = pgfnDevedores[idx];
-  if (!d || !d.isCnpj) { showToast('Sem CNPJ válido para consultar'); return; }
   const cell = document.getElementById('pgfn-proc-' + idx);
+  if (!d || !cell) return;
+
+  // Garante que só dígitos vão pro backend, sem máscara (independente do que
+  // esteja armazenado em d.cnpj — defensivo, mesmo já vindo limpo da importação).
+  const cnpjLimpo = String(d.cnpj || '').replace(/\D/g, '');
+  if (cnpjLimpo.length !== 14) {
+    cell.innerHTML = `<span class="tag tag-amber" style="cursor:default" title="Valor de CNPJ: '${(d.cnpj||'').replace(/"/g,'&quot;')}'">CNPJ inválido para consulta</span>`;
+    showToast('CNPJ inválido para consultar processos: ' + (d.cnpj || '(vazio)'));
+    return;
+  }
+
   cell.innerHTML = '<span class="spinner" style="border-color:var(--border);border-top-color:var(--accent)"></span>';
+  const url = `${BACKEND_URL}/api/datajud/search?cnpj=${cnpjLimpo}`;
+  console.log('[PGFN] Consultando DataJud:', url);
   try {
-    const res = await fetch(`${BACKEND_URL}/api/datajud/search?cnpj=${d.cnpj}`, { method: 'GET' });
-    const data = await res.json().catch(() => ({}));
+    const res = await fetch(url, { method: 'GET' });
+    let data = {};
+    try { data = await res.json(); } catch (e) {}
+    console.log('[PGFN] Resposta DataJud (status ' + res.status + '):', data);
     if (!res.ok) throw new Error(data.error || `Falha na consulta (HTTP ${res.status})`);
-    const hits = data.hits?.hits || [];
+
+    const hits = Array.isArray(data.hits?.hits) ? data.hits.hits : [];
     d._processos = hits.map(h => ({ ...h._source, _tribunal: h._tribunal || '' }));
+
+    if (!hits.length) {
+      cell.innerHTML = '<span class="tag tag-blue" style="cursor:default">Nenhum processo encontrado no DataJud</span>';
+      return;
+    }
+
     const temAdvogado = d._processos.some(p => pgfnTemAdvogado(p));
-    if (!hits.length) cell.innerHTML = '<span class="tag tag-blue" style="cursor:default">Nenhum processo</span>';
-    else if (temAdvogado) cell.innerHTML = `<span class="tag tag-amber" style="cursor:pointer" title="Detecção automática — confirme no processo" onclick="pgfnMostrarProcessos(${idx})">⚠ ${hits.length} proc. · advogado</span>`;
-    else cell.innerHTML = `<span class="tag tag-green" style="cursor:pointer" onclick="pgfnMostrarProcessos(${idx})">${hits.length} processo(s)</span>`;
+    const resumo = d._processos.slice(0, 3).map(p => {
+      const num = p.dadosBasicos?.numeroProcessoUnico || p.numero || '—';
+      const tribunal = p._tribunal || '';
+      return `${num}${tribunal ? ' <span style="color:var(--text-muted)">(' + tribunal + ')</span>' : ''}`;
+    }).join('<br>');
+    const resto = hits.length > 3 ? `<br><span style="color:var(--text-muted)">+${hits.length - 3} outro(s)</span>` : '';
+
+    cell.innerHTML = `<div style="font-size:11px;line-height:1.6">
+      <span class="tag ${temAdvogado ? 'tag-amber' : 'tag-green'}" style="cursor:pointer" title="Detecção de advogado é heurística — confirme no processo" onclick="pgfnMostrarProcessos(${idx})">${temAdvogado ? '⚠ ' : ''}${hits.length} processo(s)${temAdvogado ? ' · advogado' : ''}</span>
+      <div style="margin-top:4px;color:var(--text-secondary)">${resumo}${resto}</div>
+    </div>`;
   } catch (e) {
+    console.error('[PGFN] Erro ao consultar DataJud:', e);
     const msgSegura = (e.message || 'erro desconhecido').replace(/"/g, '&quot;');
-    cell.innerHTML = `<button class="copy-btn" style="color:var(--danger);border-color:var(--danger)" onclick="pgfnVerProcessos(${idx}, this)" title="${msgSegura}">⚠ Erro — tentar de novo</button>`;
+    const msgCurta = msgSegura.length > 45 ? msgSegura.slice(0, 45) + '…' : msgSegura;
+    cell.innerHTML = `<button class="copy-btn" style="color:var(--danger);border-color:var(--danger);white-space:normal;text-align:left" onclick="pgfnVerProcessos(${idx}, this)" title="${msgSegura}">⚠ ${msgCurta}<br>Tentar de novo</button>`;
     showToast('Erro ao consultar DataJud: ' + e.message);
   }
 }
@@ -1351,7 +1385,8 @@ function pgfnGerarMaterial(idx) {
   const d = pgfnDevedores[idx];
   if (!d) return;
   switchView('novo'); closeSidebar();
-  resetForm();
+  resetForm(); // zera o form (e esconde o botão Voltar) — mostra de novo logo abaixo
+  document.getElementById('btn-voltar-pgfn').style.display = 'inline-flex';
   document.getElementById('inp-empresa').value = d.fantasia || d.nome;
   if (d.isCnpj) document.getElementById('inp-cnpj').value = pgfnFormatCnpjCpf(d.cnpj);
   if (d.setor) { const sel = document.getElementById('inp-setor'); for (const o of sel.options) { if (o.text === d.setor) { sel.value = o.value; break; } } }
@@ -1360,6 +1395,13 @@ function pgfnGerarMaterial(idx) {
   document.getElementById('inp-contexto').value = linhas.join(' ');
   showToast('Formulário preenchido com dados da PGFN');
   if (d.isCnpj) buscarCNPJ(); // enriquece com Receita Federal e já busca processos judiciais
+}
+
+// Volta para a aba PGFN sem tocar em pgfnDevedores/pgfnFiltered/filtros — o arquivo
+// importado e os filtros aplicados continuam intactos, exatamente como estavam.
+function pgfnVoltar() {
+  switchView('pgfn');
+  closeSidebar();
 }
 
 pgfnInitFiltros();
