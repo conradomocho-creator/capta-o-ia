@@ -966,28 +966,64 @@ function pgfnInitFiltros() {
   }
 }
 
-// Colunas exatas do arquivo oficial exportado pela PGFN (listadevedores.pgfn.gov.br).
-// Quando todas as obrigatórias são encontradas, o mapeamento é 100% automático e a
-// etapa de confirmação manual é pulada.
-const PGFN_HEADER_EXACT = {
-  nome: 'NOME_DEVEDOR',
-  cnpj: 'CPF_CNPJ',
-  uf: 'UF_DEVEDOR',
-  valor: 'VALOR_CONSOLIDADO',
-  tipo: 'TIPO_CREDITO',
-  tipoSecundario: 'RECEITA_PRINCIPAL',
-  municipio: 'NOME_MUN_DEVEDOR',
-  situacao: 'SITUACAO_INSCRICAO',
-  dataInscricao: 'DATA_INSCRICAO',
-};
-const PGFN_HEADER_EXACT_OBRIGATORIOS = ['nome', 'cnpj', 'uf', 'valor'];
+// Formato real do arquivo exportado pelo site oficial da PGFN (listadevedores.pgfn.gov.br):
+//  - Encoding ISO-8859-1 (latin1), não UTF-8
+//  - Separador ';'
+//  - Preâmbulo antes dos dados: título "Lista de Devedores - PGFN", bloco
+//    "Filtros Utilizados:" (UF, natureza da dívida, faixa de valor, CNAE — este
+//    último às vezes quebra em várias linhas dentro de um campo entre aspas) e
+//    "Data da pesquisa:", até a linha de cabeçalho real, que começa com "CPF/CNPJ"
+//  - Colunas de dados: CPF/CNPJ;Nome;Nome Fantasia;Valor Total;Valor da Dívida Selecionada
+//  - Não existe coluna de UF/tipo de dívida por linha — só aparecem como filtros
+//    usados no preâmbulo (ex.: "Estado: SP"), aplicados como padrão do lote inteiro.
+const PGFN_HEADER_LINE_REGEX = /^\s*CPF\/CNPJ\s*;/mi;
 
-function pgfnDetectFormatoOficial(headers) {
-  const upper = headers.map(h => (h || '').toString().trim().toUpperCase());
-  const mapping = {};
-  for (const campo in PGFN_HEADER_EXACT) mapping[campo] = upper.indexOf(PGFN_HEADER_EXACT[campo]);
-  const completo = PGFN_HEADER_EXACT_OBRIGATORIOS.every(campo => mapping[campo] !== -1);
-  return completo ? mapping : null;
+function pgfnExtrairMetadadosPreambulo(preambulo) {
+  const defaults = {};
+  const ufMatch = preambulo.match(/Estado:\s*"?([^"\r\n]{2,30}?)"?\s*(?:\r?\n|$)/i);
+  if (ufMatch) {
+    const val = ufMatch[1].trim().toUpperCase();
+    defaults.uf = /^[A-Z]{2}$/.test(val) ? val : ''; // só usa se for a sigla direto (ex. "SP")
+  }
+  const naturezaMatch = preambulo.match(/Natureza da d[ií]vida:\s*"?([^"\r\n]+?)"?\s*(?:\r?\n|$)/i);
+  if (naturezaMatch) defaults.natureza = naturezaMatch[1].trim();
+  return defaults;
+}
+
+function pgfnDetectFormatoOficialPGFN(csvText) {
+  const headerMatch = PGFN_HEADER_LINE_REGEX.exec(csvText);
+  if (!headerMatch) return null;
+
+  const preambulo = csvText.slice(0, headerMatch.index);
+  const corpo = csvText.slice(headerMatch.index); // header real + dados — sem o preâmbulo problemático
+  const parsed = pgfnParseCsv(corpo);
+  if (!parsed.headers.length) return null;
+
+  const norm = parsed.headers.map(pgfnNormalizeHeader);
+  const acha = (alvo) => norm.indexOf(alvo);
+  const mapping = {
+    cnpj: acha('cpfcnpj'),
+    nome: acha('nome'),
+    fantasia: acha('nomefantasia'),
+  };
+  const idxSelecionado = acha('valordadividaselecionada');
+  const idxTotal = acha('valortotal');
+  mapping.valor = idxSelecionado !== -1 ? idxSelecionado : idxTotal;
+
+  if (mapping.cnpj === -1 || mapping.nome === -1 || mapping.valor === -1) return null;
+
+  return { mapping, rows: parsed.rows, defaults: pgfnExtrairMetadadosPreambulo(preambulo) };
+}
+
+function pgfnDecodeBytes(bytes) {
+  // Arquivos de sistemas do governo costumam vir em ISO-8859-1 (latin1) em vez de
+  // UTF-8. Tenta decodificar como UTF-8 estrito primeiro; se a sequência de bytes
+  // não for UTF-8 válido, cai para ISO-8859-1 (que aceita qualquer byte sem erro).
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (e) {
+    return new TextDecoder('iso-8859-1').decode(bytes);
+  }
 }
 
 // --- Leitura do arquivo (.zip ou .csv) ---
@@ -998,7 +1034,7 @@ async function pgfnHandleFile(ev) {
   if (!file) return;
   status.textContent = '🔄 Lendo arquivo...'; status.style.color = 'var(--text-muted)';
   try {
-    let csvText = '';
+    let bytes;
     const isZip = file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip';
     if (isZip) {
       if (typeof JSZip === 'undefined') throw new Error('Biblioteca de leitura de .zip não carregou. Extraia o CSV manualmente e importe o .csv.');
@@ -1006,30 +1042,37 @@ async function pgfnHandleFile(ev) {
       const zip = await JSZip.loadAsync(buf);
       const csvEntry = Object.values(zip.files).find(f => !f.dir && /\.csv$/i.test(f.name));
       if (!csvEntry) throw new Error('Nenhum arquivo .csv encontrado dentro do .zip.');
-      csvText = await csvEntry.async('string');
+      bytes = await csvEntry.async('uint8array'); // bytes crus — a gente decide o encoding, não o JSZip
     } else {
-      csvText = await file.text();
+      bytes = new Uint8Array(await file.arrayBuffer());
     }
-    csvText = csvText.replace(/^﻿/, ''); // remove BOM
-    const parsed = pgfnParseCsv(csvText);
-    if (!parsed.headers.length || !parsed.rows.length) throw new Error('Não foi possível identificar linhas/colunas no arquivo.');
-    pgfnRawHeaders = parsed.headers;
-    pgfnRawRows = parsed.rows;
 
-    const formatoOficial = pgfnDetectFormatoOficial(pgfnRawHeaders);
-    if (formatoOficial) {
-      const n = pgfnImportar(formatoOficial);
-      status.innerHTML = `✅ Formato oficial da PGFN reconhecido — ${n} devedor(es) importado(s) automaticamente (de ${parsed.rows.length} linha(s) lida(s)).`;
+    let csvText = pgfnDecodeBytes(bytes);
+    csvText = csvText.replace(/^﻿/, ''); // remove BOM se sobrou
+
+    // 1ª tentativa: formato oficial real da PGFN (preâmbulo + cabeçalho "CPF/CNPJ;...")
+    const formatoPgfn = pgfnDetectFormatoOficialPGFN(csvText);
+    if (formatoPgfn) {
+      const n = pgfnImportar(formatoPgfn.mapping, formatoPgfn.rows, formatoPgfn.defaults);
+      status.innerHTML = `✅ Formato oficial da PGFN reconhecido (listadevedores.pgfn.gov.br) — ${n} devedor(es) importado(s) automaticamente.`;
       status.style.color = 'var(--success)';
       return;
     }
 
+    // 2ª tentativa: outro formato — parse genérico + mapeamento por aproximação
+    const parsed = pgfnParseCsv(csvText);
+    if (!parsed.headers.length || !parsed.rows.length) {
+      throw new Error('Não reconheci o formato do arquivo. Confirme se é o .zip/.csv exportado direto de listadevedores.pgfn.gov.br, sem edições.');
+    }
+    pgfnRawHeaders = parsed.headers;
+    pgfnRawRows = parsed.rows;
+
     pgfnMapping = pgfnAutoMapColumns(pgfnRawHeaders);
     pgfnRenderMappingUI();
-    status.innerHTML = `✅ ${parsed.rows.length} linha(s) lida(s), ${parsed.headers.length} coluna(s). Formato não reconhecido automaticamente — confira o mapeamento abaixo e confirme.`;
+    status.innerHTML = `✅ ${parsed.rows.length} linha(s) lida(s), ${parsed.headers.length} coluna(s). Não reconheci o formato padrão da PGFN — confira o mapeamento abaixo e confirme, ou verifique se o arquivo é mesmo o export oficial.`;
     status.style.color = 'var(--success)';
   } catch (e) {
-    status.textContent = '❌ ' + e.message;
+    status.innerHTML = `❌ ${e.message}`;
     status.style.color = 'var(--danger)';
   }
 }
@@ -1102,18 +1145,21 @@ function pgfnRenderMappingUI() {
   box.style.display = 'block';
 }
 
-function pgfnRowToDevedor(row, mapping) {
+function pgfnRowToDevedor(row, mapping, defaults) {
+  defaults = defaults || {};
   const get = (campo) => mapping[campo] >= 0 ? (row[mapping[campo]] || '') : '';
   const cnpjLimpo = get('cnpj').replace(/\D/g,'');
-  const tipoTexto = [get('tipo'), get('tipoSecundario')].filter(Boolean).join(' ');
+  const tipoTexto = [get('tipo'), get('tipoSecundario'), defaults.natureza].filter(Boolean).join(' ');
   return {
     nome: get('nome') || get('fantasia') || 'Empresa sem nome',
     fantasia: get('fantasia'),
     cnpj: cnpjLimpo,
     isCnpj: cnpjLimpo.length === 14,
-    uf: get('uf').toUpperCase().trim(),
+    // UF/tipo por linha têm prioridade; se a coluna não existir no arquivo (caso do
+    // formato oficial da PGFN), usa o que foi extraído do preâmbulo (filtros usados).
+    uf: (get('uf') || defaults.uf || '').toUpperCase().trim(),
     valor: pgfnParseValorBR(get('valor')),
-    tipoRaw: get('tipo') || tipoTexto,
+    tipoRaw: get('tipo') || defaults.natureza || tipoTexto,
     tipo: pgfnClassificarTipo(tipoTexto),
     municipio: get('municipio'),
     cnae: get('cnae'),
@@ -1123,10 +1169,12 @@ function pgfnRowToDevedor(row, mapping) {
   };
 }
 
-// Constrói pgfnDevedores a partir de pgfnRawRows + um mapping (campo -> índice de coluna).
-// Usado tanto pela detecção automática do formato oficial quanto pela confirmação manual.
-function pgfnImportar(mapping) {
-  pgfnDevedores = pgfnRawRows.map(row => pgfnRowToDevedor(row, mapping)).filter(d => d.cnpj);
+// Constrói pgfnDevedores a partir de um mapping (campo -> índice de coluna) + as
+// linhas de dados. Usado tanto pela detecção automática do formato oficial da PGFN
+// (rows/defaults explícitos) quanto pela confirmação manual (usa pgfnRawRows).
+function pgfnImportar(mapping, rows, defaults) {
+  const linhas = rows || pgfnRawRows;
+  pgfnDevedores = linhas.map(row => pgfnRowToDevedor(row, mapping, defaults)).filter(d => d.cnpj);
   document.getElementById('pgfn-mapping-box').style.display = 'none';
   document.getElementById('pgfn-filtros-card').style.display = 'block';
   document.getElementById('pgfn-resultados-card').style.display = 'block';
